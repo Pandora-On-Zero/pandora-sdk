@@ -242,8 +242,10 @@ def test_a_receiver_the_app_holds_is_reported_as_in_use(monkeypatch):
         pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
 
 
-def test_without_the_pipelines_default_files_it_refuses_to_guess(link):
-    """An installed pandora-core carries none today; hands made without them
+def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypatch):
+    """A pandora-core from before it carried them; hands made without them
     would be wrong, silently."""
+    monkeypatch.setattr("pandora_sdk.local.shipped_defaults", lambda: {})
+
     with pytest.raises(pandora_sdk.PandoraError, match="default files"):
         pandora_sdk.Local(PROFILES, link=link)
