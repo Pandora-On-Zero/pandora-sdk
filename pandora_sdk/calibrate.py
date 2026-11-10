@@ -29,8 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
 from pandora_core import commands
-from pandora_core.calibration_session import (CalibrationSession, Run, Step, StepKind,
-                                               calibrate_packets)
+from pandora_core.calibration_session import CalibrationSession, Run, Step, calibrate_packets
 from pandora_core.glove import Glove, Profile
 from pandora_core.packet_decoder import GlovePacket
 from pandora_core.packet_layout import (
@@ -243,10 +242,7 @@ class _Screen:
         left = math.ceil(session.remaining_s - 1e-6)
         if left != self._left and left > 0:
             self._left = left
-            # The session renews its prompt only in the zero step, and keeps
-            # the last one through the steps after it.
-            warned = ([text for good, text in session.prompt if not good]
-                      if step.kind is StepKind.TOGETHER else [])
+            warned = [text for good, text in session.prompt if not good]
             self._say(f"  {left}" + (f"    ! {'; '.join(warned)}" if warned else ""))
 
 
