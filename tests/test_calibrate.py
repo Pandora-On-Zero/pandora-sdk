@@ -186,11 +186,11 @@ def test_a_glove_never_calibrated_needs_its_hand_said(folder, link):
         calibrate(link, out=folder, haptics=False, say=quiet, **QUICK)
 
 
-def test_a_warning_is_said_once_a_second_and_only_in_the_step_that_raised_it():
+def test_a_warning_is_said_once_a_second_while_the_session_has_one():
     """The session judges the pose on every packet, 200 a second, and a
-    finger near the limit flips the warning's wording each time; it also
-    keeps its last warning after the step. A terminal gets one line a second
-    while the step lasts and none in the next."""
+    finger near the limit flips the warning's wording each time. A terminal
+    gets one line a second while the session warns, and none in the next
+    step, where the session's prompt is empty again."""
     said: List[str] = []
     screen = _Screen(said.append, lambda: None)
     together = Step(StepKind.TOGETHER, "TOGETHER", "Open hand, fingers together", "Hold.", 2.0)
@@ -202,9 +202,9 @@ def test_a_warning_is_said_once_a_second_and_only_in_the_step_that_raised_it():
         session.index = packet // 400
         session.step = session.steps[session.index]
         session.remaining_s = 2.0 - (packet % 400) * 0.005
-        if session.step is together:
-            session.prompt = [(False, "Point the fingers forward, not up or down"),
-                              (False, "Right: Index" if packet % 2 else "Right: Index, Ring")]
+        session.prompt = ([(False, "Point the fingers forward, not up or down"),
+                           (False, "Right: Index" if packet % 2 else "Right: Index, Ring")]
+                          if session.step is together else [])
         screen(session)
 
     warned = [line for line in said if "Point the fingers forward" in line]
