@@ -40,6 +40,17 @@ git config --global core.longpaths true
 
 Python 3.11 or newer. It brings in `websockets`, `msgpack`, `numpy` and `pyserial`.
 
+To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
+
+```bash
+pip install --force-reinstall git+https://github.com/Pandora-On-Zero/pandora-sdk.git
+```
+
+Without it pip keeps the `pandora-core` it already has, even with `--upgrade`:
+every commit of `pandora-core` carries the same version number, so pip takes
+the old one for the one now asked for. The new `pandora-sdk` then fails on the
+first thing the old core lacks.
+
 ## Before you connect
 
 The app must be running with its protocol server on: **Settings ▸ General ▸
@@ -271,7 +282,9 @@ layout. No test opens a real port, and every test gets a temporary home
 folder, so none reads or writes your `.pandora/profiles`.
 
 `pyproject.toml` pins `pandora-core` to one commit of the Pandora repository.
-Move the pin when the protocol gains something this library should use.
+Move the pin when the core gains something this library should use, then
+install again with `pip install --force-reinstall -e ".[dev]"`, for the reason
+given under [Installing](#installing).
 
 ## Not here yet
 
