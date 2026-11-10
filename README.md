@@ -14,9 +14,10 @@ with pandora_sdk.connect() as gloves:
         print(hand.angles_deg[1])    # index: MCP, PIP, DIP flexion, MCP abduction
 ```
 
-**Status:** version 0.1, private. It reads hands and raw readings from a
-running app. It cannot yet send anything to a glove (haptics, settings) or run
-without the app; see [Not here yet](#not-here-yet).
+**Status:** version 0.1, private. It reads hands and raw readings, through a
+running app or straight from the receiver with no app. It cannot yet send
+anything to a glove (haptics, settings) or calibrate one; see
+[Not here yet](#not-here-yet).
 
 ## Installing
 
@@ -36,7 +37,7 @@ download of that repository fails with "Filename too long":
 git config --global core.longpaths true
 ```
 
-Python 3.11 or newer. It brings in `websockets`, `msgpack` and `numpy`.
+Python 3.11 or newer. It brings in `websockets`, `msgpack`, `numpy` and `pyserial`.
 
 ## Before you connect
 
@@ -119,14 +120,46 @@ for reading in gloves.raw():
     print(reading.hall[1][0])            # index finger, proximal sensor: (x, y, z) counts
 ```
 
+### Without the app
+
+`open_receiver()` reads the receiver itself and runs each glove's pipeline in
+your process. Everything after that line is the same as with `connect()`:
+`subscribe`, `frames`, `raw`, `read`, `latest`, `devices`, and the same frames.
+
+```python
+with pandora_sdk.open_receiver("profiles/") as gloves:
+    gloves.subscribe(hands=["right"], rate_hz=50, bones=False)
+    for hand in gloves.frames():
+        print(hand.angles_deg[1])
+```
+
+Only one program can hold the receiver. If the app is running, it has it: use
+`connect()`, or close the app.
+
+Each glove needs a **profile**: its hand and its calibration. `profiles` is a
+folder with one `<glove id>.json` per glove, or a dict of glove id to profile.
+A profile is the JSON form of `pandora_core.glove.Profile`, the same thing a
+hand recording stores per glove. A glove that sends but has no profile is left
+out, and `gloves.unprofiled` holds its id.
+
+Two limits today, each of them a piece of work still to come:
+
+- **Nothing here writes a profile yet.** `pandora calibrate` will.
+- **Nothing is sent to a glove**, so its Hall range is whatever it powers up
+  in. A profile's calibration must have been taken at that range.
+
+One thread runs every glove's pipeline. On the PC this was written on, a
+packet takes about a millisecond with both streams and the skeleton on, and a
+glove sends 200 a second.
+
 ### When things go wrong
 
 | Raised | When |
 | --- | --- |
-| `pandora_sdk.ConnectionFailed` | Nothing answered: the app is not running, or Protocol is off |
+| `pandora_sdk.ConnectionFailed` | Nothing answered: the app is not running, or Protocol is off. Without the app: no receiver, or something else holds it |
 | `pandora_sdk.ProtocolError` | The app speaks another protocol version (`.code` is `unsupported_protocol`) |
 | `pandora_sdk.ServerError` | The app refused a request; `.code` is the protocol's error code |
-| `pandora_sdk.Disconnected` | The app went away while you were reading |
+| `pandora_sdk.Disconnected` | The app went away, or the receiver was unplugged, while you were reading |
 | `TimeoutError` | A `read(timeout=...)` or a request ran out of time |
 
 If your loop reads more slowly than frames arrive, the oldest unread ones are
@@ -173,8 +206,9 @@ Move the pin when the protocol gains something this library should use.
 
 - Sending to a glove: haptics, Hall range and other settings. The protocol has
   no messages for them yet.
-- Running without the app (reading the receiver directly through
-  `pandora-core`), `pandora calibrate` and `pandora update-firmware`.
+- `pandora calibrate`, which will write the profiles `open_receiver()` needs,
+  and `pandora update-firmware`.
+- `pandora watch` reading the receiver directly. It reads through the app.
 - An `asyncio` client. This one is blocking, with one background thread.
 - A licence, and a release on PyPI. Both wait for the repository going public,
   which also needs `pandora-core` to be installable by people outside the
