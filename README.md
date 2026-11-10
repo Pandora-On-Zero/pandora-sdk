@@ -142,18 +142,14 @@ A profile is the JSON form of `pandora_core.glove.Profile`, the same thing a
 hand recording stores per glove. A glove that sends but has no profile is left
 out, and `gloves.unprofiled` holds its id.
 
-Three limits today, each of them a piece of work still to come:
+Two limits today, each of them a piece of work still to come:
 
 - **Nothing here writes a profile yet.** `pandora calibrate` will.
 - **Nothing is sent to a glove**, so its Hall range is whatever it powers up
   in. A profile's calibration must have been taken at that range.
-- **The pipeline's default files** (sensor positions, the hand's rest pose)
-  are not inside an installed `pandora-core` yet. Until they are, pass them as
-  `defaults=`; without them `open_receiver()` refuses to start, because hands
-  made without them would be wrong.
 
 One thread runs every glove's pipeline. On the PC this was written on, a
-packet takes under a millisecond with both streams and the skeleton on, and a
+packet takes about a millisecond with both streams and the skeleton on, and a
 glove sends 200 a second.
 
 ### When things go wrong

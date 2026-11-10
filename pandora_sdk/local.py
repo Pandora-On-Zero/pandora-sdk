@@ -78,9 +78,10 @@ class Local(Source):
         super().__init__(buffer)
         if defaults is None and not shipped_defaults():
             raise PandoraError(
-                "pandora-core has none of its default files here (hall_reference.default.json, "
+                "this pandora-core carries none of its default files (hall_reference.default.json, "
                 "ic_overrides.default.json, bone_pose_overrides.json), and hands made without "
-                "them are wrong. Pass them as defaults=, parsed, by file name.")
+                "them are wrong. Reinstall pandora-sdk, or pass them as defaults=, parsed, by "
+                "file name.")
         if isinstance(profiles, (str, Path)):
             self._profiles = load_profiles(profiles)
         else:
