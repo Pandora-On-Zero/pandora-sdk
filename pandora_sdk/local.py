@@ -13,10 +13,13 @@ by changing one line. Here the pipeline (pandora-core) runs in this process:
 one thread reads the receiver's port and pushes each glove's packets through
 that glove's own pipeline.
 
-Each glove needs a profile: its hand and the calibration it carries. Packets
-from a glove with none are left out, and its id is kept in `unprofiled`.
-Nothing is sent to a glove yet (no haptics, no Hall range), so a profile's
-calibration must have been taken at the range the glove powers up in.
+Each glove needs a profile: its hand and the calibration it carries. `pandora
+calibrate` (pandora_sdk/calibrate.py) writes one, into default_profiles_dir()
+unless told otherwise, which is also where profiles are read from when none
+are named. Packets from a glove with none are left out, and its id is kept in
+`unprofiled`. Nothing is sent to a glove from here (no haptics, no Hall
+range), so a profile's calibration must have been taken at the range the
+glove powers up in, which is the range `pandora calibrate` puts it on.
 """
 from __future__ import annotations
 
@@ -25,7 +28,8 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple,
+                    Union)
 
 from pandora_core import protocol, receiver
 from pandora_core.glove import Glove, Profile
@@ -45,21 +49,88 @@ Profiles = Union[str, Path, Mapping[str, Union[Profile, Mapping[str, Any]]]]
 _log = logging.getLogger("pandora_sdk")
 
 
+def default_profiles_dir() -> Path:
+    """Where `pandora calibrate` writes profiles and open_receiver() reads
+    them when no folder is named: `.pandora/profiles` in the home folder."""
+    return Path.home() / ".pandora" / "profiles"
+
+
 def load_profiles(folder: Union[str, Path]) -> Dict[str, Profile]:
     """The profiles in *folder*: one `<device id>.json` per glove, each the
-    JSON form of a pandora_core Profile (hand, sections, range, ...)."""
+    JSON form of a pandora_core Profile (hand, sections, range, ...). None
+    when there is no such folder."""
     return {path.stem: Profile.from_dict(json.loads(path.read_text(encoding="utf-8")))
             for path in sorted(Path(folder).glob("*.json"))}
 
 
-def open_receiver(profiles: Profiles, *, port: Optional[str] = None,
+def save_profile(folder: Union[str, Path], device_id: str, profile: Profile) -> Path:
+    """Write *profile* as *folder*'s `<device id>.json`, whole or not at all;
+    the file's path."""
+    path = Path(folder) / f"{device_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    unfinished = path.with_name(path.name + ".tmp")
+    unfinished.write_text(json.dumps(profile.to_dict(), indent=1) + "\n", encoding="utf-8")
+    unfinished.replace(path)
+    return path
+
+
+def open_link(port: Optional[str] = None) -> Any:
+    """The receiver's serial port, opened as the link needs: *port*, or the
+    one receiver plugged in."""
+    if port is None:
+        found = receiver.find_receivers()
+        if not found:
+            raise ConnectionFailed("no receiver is plugged into this computer")
+        if len(found) > 1:
+            raise ConnectionFailed(
+                f"more than one receiver ({', '.join(f.device for f in found)}); "
+                "say which one by its port")
+        port = found[0].device
+    try:
+        link = receiver.open_port(port, timeout=0.2)
+    except OSError as failed:
+        if receiver.is_port_locked(failed):
+            raise ConnectionFailed(
+                f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
+                "read through it with pandora_sdk.connect(), or close it.") from None
+        raise ConnectionFailed(f"could not open {port}: {failed}") from None
+    receiver.prepare_link(port, link, _log.info)
+    return link
+
+
+def link_packets(link: Any,
+                 decoder: Optional[PacketDecoder] = None) -> Iterator[Optional[GlovePacket]]:
+    """Each tracking packet as *link* delivers it, from any glove, and None
+    for a read that held none, so the reader can stop or lose patience.
+    Never ends; a failing port raises its OSError (link_failure words it)."""
+    decoder = decoder or PacketDecoder()
+    splitter = receiver.LineSplitter()
+    while True:
+        found = False
+        for line in splitter.feed(receiver.read_available(link)):
+            packet = receiver.packet_from_line(line, decoder)
+            if packet is not None:
+                found = True
+                yield packet
+        if not found:
+            yield None
+
+
+def link_failure(failed: OSError) -> str:
+    """Why reading the receiver ended, for the person at the keyboard."""
+    return ("the receiver was unplugged" if receiver.is_disconnect_error(failed)
+            else f"reading the receiver failed ({failed})")
+
+
+def open_receiver(profiles: Optional[Profiles] = None, *, port: Optional[str] = None,
                   tuning: Union[Tuning, Mapping[str, Any], None] = None,
                   defaults: Optional[Mapping[str, Any]] = None, buffer: int = 256) -> "Local":
     """Open the receiver on this computer and run the gloves' pipelines here.
 
     *profiles* is a folder of `<device id>.json` files, or a dict of device id
-    to profile. *port* names the receiver's serial port when there is more
-    than one. *tuning* is the pipeline's settings (pandora_core Tuning),
+    to profile; left out, it is default_profiles_dir(), where `pandora
+    calibrate` writes. *port* names the receiver's serial port when there is
+    more than one. *tuning* is the pipeline's settings (pandora_core Tuning),
     *defaults* its shipped default files as parsed JSON by file name; left
     out, pandora-core's own are used.
     """
@@ -71,7 +142,7 @@ class Local(Source):
     already open port (or anything with its read, in_waiting and close), and
     *clock* the seconds frames are stamped and paced with."""
 
-    def __init__(self, profiles: Profiles, *, port: Optional[str] = None,
+    def __init__(self, profiles: Optional[Profiles] = None, *, port: Optional[str] = None,
                  tuning: Union[Tuning, Mapping[str, Any], None] = None,
                  defaults: Optional[Mapping[str, Any]] = None, buffer: int = 256,
                  link: Any = None, clock: Callable[[], float] = time.monotonic) -> None:
@@ -82,8 +153,9 @@ class Local(Source):
                 "ic_overrides.default.json, bone_pose_overrides.json), and hands made without "
                 "them are wrong. Reinstall pandora-sdk, or pass them as defaults=, parsed, by "
                 "file name.")
-        if isinstance(profiles, (str, Path)):
-            self._profiles = load_profiles(profiles)
+        if profiles is None or isinstance(profiles, (str, Path)):
+            self._profiles = load_profiles(
+                default_profiles_dir() if profiles is None else profiles)
         else:
             self._profiles = {device: profile if isinstance(profile, Profile)
                               else Profile.from_dict(profile)
@@ -98,33 +170,11 @@ class Local(Source):
         self.unprofiled: Set[str] = set()
         # Tracking packets read so far, from any glove.
         self.packets = 0
-        self._link = self._open(port) if link is None else link
+        self._link = open_link(port) if link is None else link
         self._running = True
         self._reader = threading.Thread(target=self._read_link, name="pandora-sdk-receiver",
                                         daemon=True)
         self._reader.start()
-
-    @staticmethod
-    def _open(port: Optional[str]) -> Any:
-        if port is None:
-            found = receiver.find_receivers()
-            if not found:
-                raise ConnectionFailed("no receiver is plugged into this computer")
-            if len(found) > 1:
-                raise ConnectionFailed(
-                    f"more than one receiver ({', '.join(f.device for f in found)}); "
-                    "say which with port=")
-            port = found[0].device
-        try:
-            link = receiver.open_port(port, timeout=0.2)
-        except OSError as failed:
-            if receiver.is_port_locked(failed):
-                raise ConnectionFailed(
-                    f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                    "read through it with pandora_sdk.connect(), or close it.") from None
-            raise ConnectionFailed(f"could not open {port}: {failed}") from None
-        receiver.prepare_link(port, link, _log.info)
-        return link
 
     # ── the same requests as the app answers ─────────────────────────────
 
@@ -154,18 +204,16 @@ class Local(Source):
     # ── the receiver ─────────────────────────────────────────────────────
 
     def _read_link(self) -> None:
-        """The reader thread: lines to packets to frames until the port ends."""
+        """The reader thread: packets to frames until the port ends."""
         why = ""
-        splitter = receiver.LineSplitter()
         try:
-            while self._running:
-                for line in splitter.feed(receiver.read_available(self._link)):
-                    packet = receiver.packet_from_line(line, self._decoder)
-                    if packet is not None:
-                        self._on_packet(packet)
+            for packet in link_packets(self._link, self._decoder):
+                if not self._running:
+                    break
+                if packet is not None:
+                    self._on_packet(packet)
         except OSError as failed:
-            why = ("the receiver was unplugged" if receiver.is_disconnect_error(failed)
-                   else f"reading the receiver failed ({failed})")
+            why = link_failure(failed)
         except Exception as failed:  # the pipeline's own failure must not pass for silence
             why = f"a glove's pipeline failed ({failed!r})"
         self._end(why)
