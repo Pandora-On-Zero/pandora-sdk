@@ -12,7 +12,8 @@ from typing import List, Optional
 
 from pandora_core.protocol import DEFAULT_PORT, HANDS, Frame, ProtocolError, Raw
 
-from pandora_sdk.client import Client, PandoraError, connect
+from pandora_sdk.client import connect
+from pandora_sdk.source import PandoraError, Source
 
 
 def _frame_line(hand: Frame) -> str:
@@ -29,14 +30,14 @@ def _raw_line(reading: Raw) -> str:
             f"battery {reading.battery_pct}%")
 
 
-def _devices(gloves: Client) -> int:
+def _devices(gloves: Source) -> int:
     for device in gloves.devices():
         state = "connected" if device.connected else "silent"
         print(f"{device.id}  {device.hand:<5}  {state}  {device.name}".rstrip())
     return 0
 
 
-def _watch(gloves: Client, args: argparse.Namespace) -> int:
+def _watch(gloves: Source, args: argparse.Namespace) -> int:
     stream = "raw" if args.raw else "frames"
     gloves.subscribe(stream, devices=args.device, hands=args.hand or HANDS, rate_hz=args.rate,
                      bones=False)
