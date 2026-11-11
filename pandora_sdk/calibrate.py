@@ -15,7 +15,8 @@ The clock is the glove's own (its packets' timestamps), so a countdown stops
 while the glove is out of range and nothing is captured from old data.
 
 A profile is good for one Hall range, and open_receiver() sends a glove
-nothing, so the range it will meet is the one a glove powers up in. The run
+nothing unless asked, so the range it will meet is the one a glove powers up
+in. The run
 therefore starts by resetting every Hall sensor to its power-up settings, and
 the profile records that range. The glove does not report back, so this is
 what it was told, not what it confirmed.
@@ -36,11 +37,10 @@ from pandora_core.packet_layout import (
     HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_DEFAULT_RANGE, HALL_TARGET_ALL,
     HAPTIC_BACKHAND_MOTOR, HAPTIC_MOTOR_COUNT,
 )
-from pandora_core.serial_framing import encode_frame
 from pandora_core.tuning import Tuning
 
 from pandora_sdk.local import (default_profiles_dir, link_failure, link_packets, load_profiles,
-                               save_profile)
+                               save_profile, send_command)
 from pandora_sdk.source import Disconnected, PandoraError
 
 # The cue: the back-of-hand motor at full drive (pandora_core commands.haptic_rtp
@@ -100,7 +100,7 @@ def calibrate(link: Any, *, hand: Optional[str] = None, device: Optional[str] = 
     glove_id = _pick(feed, device, listen_s, wait_s)
     profile = _starting_profile(folder, glove_id, hand, name, say)
     say(f"Glove {glove_id}, {profile.hand} hand.")
-    _send(link, commands.hall_config(
+    send_command(link, commands.hall_config(
         glove_id, reset=True, range_val=HALL_DEFAULT_RANGE, osr=HALL_DEFAULT_OSR,
         odr=HALL_DEFAULT_ODR, filter_val=HALL_DEFAULT_FILTER, target=HALL_TARGET_ALL))
     say(f"First step in {ready_s:g} s."
@@ -249,14 +249,5 @@ class _Screen:
 def _buzz(link: Any, device: str, ms: int) -> None:
     amplitudes, durations = [0] * HAPTIC_MOTOR_COUNT, [0] * HAPTIC_MOTOR_COUNT
     amplitudes[HAPTIC_BACKHAND_MOTOR], durations[HAPTIC_BACKHAND_MOTOR] = CUE_AMPLITUDE, ms
-    _send(link, commands.haptic_rtp(device, amplitudes, durations))
-
-
-def _send(link: Any, payload: bytes) -> None:
-    """Write one command for a glove to the receiver."""
-    try:
-        link.write(encode_frame(payload))
-    except OSError as failed:  # pyserial's errors, its write timeout among them, are OSErrors
-        raise PandoraError(f"could not send to the receiver ({failed}). If it stays like "
-                           "this, unplug the receiver and plug it back in.") from None
+    send_command(link, commands.haptic_rtp(device, amplitudes, durations))
 

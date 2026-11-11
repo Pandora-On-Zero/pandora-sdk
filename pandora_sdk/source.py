@@ -1,22 +1,28 @@
 """What both ways of getting hands share: the errors, and Source, which keeps
-what arrives and hands it out.
+what arrives and hands it out, and names what can be sent to a glove.
 
 A Source is fed by one background thread (the socket's, or the receiver's).
 Per stream it keeps the newest message of each glove (latest()) and a short
-queue of unread ones (read(), frames(), raw()); when the queue is full the
-oldest is dropped and counted, so a slow reader gets fresh hands, not a
-growing backlog.
+queue of unread ones (read(), frames(), raw(), debug()); when the queue is
+full the oldest is dropped and counted, so a slow reader gets fresh hands, not
+a growing backlog.
+
+The commands for a glove (play_rom, play_rtp, stop, set_hall_range) and its
+calibration bounds have the same names and arguments in both modes; each mode
+answers them its own way.
 """
 from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import Any, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union
+from typing import (Any, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union,
+                    overload)
 
 from pandora_core import protocol
-from pandora_core.protocol import Device, Frame, Raw, Subscription
+from pandora_core.packet_layout import HAPTIC_MOTOR_COUNT
+from pandora_core.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
 
-Message = Union[Frame, Raw]
+Message = Union[Frame, Raw, Debug]
 
 
 class PandoraError(Exception):
@@ -98,9 +104,14 @@ class Source:
         """Each raw message as it arrives; ends as frames() does."""
         return self._each("raw")
 
+    def debug(self) -> Iterator[Debug]:
+        """Each debug message (the pipeline's named values for one glove) as
+        it arrives; ends as frames() does."""
+        return self._each("debug")
+
     def latest(self, glove: str, stream: str = "frames") -> Any:
-        """The newest message from *glove*, read or not; None before its
-        first. *glove* is a device id, or "left" or "right" for the glove on
+        """The newest message of *stream* from *glove*, read or not; None
+        before its first. *glove* is a device id, or "left" or "right" for the glove on
         that hand (with two on one hand, whichever sent last). For a control
         loop that wants the hand as it is now."""
         with self._changed:
@@ -137,8 +148,71 @@ class Source:
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
-                  bones: bool = True, timeout: Optional[float] = None) -> Subscription:
+                  bones: bool = True, keys: Sequence[str] = ("*",),
+                  timeout: Optional[float] = None) -> Subscription:
         """Ask for a stream; nothing is delivered before."""
+        raise NotImplementedError
+
+    # ── commands for a glove ─────────────────────────────────────────────
+    #
+    # Each names one glove by its id and returns once the command went to
+    # the receiver. ServerError, with the protocol's code, when it could not:
+    # "unknown_device" for a glove that is not connected, "bad_haptics" or
+    # "bad_hall_range" for values the protocol does not allow, "send_failed"
+    # when it could not be sent. Motors are in the order thumb, index, middle,
+    # ring, pinky, back of the hand.
+
+    def play_rom(self, device: str, effects: Sequence[int],
+                 timeout: Optional[float] = None) -> None:
+        """Play one effect of the motor driver's library (DRV2625, Immersion
+        Library A) per motor: six ids, 1 to 123, 0 leaving that motor alone."""
+        raise NotImplementedError
+
+    def play_rtp(self, device: str, amplitudes: Sequence[int], durations_ms: Sequence[int],
+                 timeout: Optional[float] = None) -> None:
+        """Drive the motors directly: per motor an amplitude (1 to 127
+        drives, 128 to 255 brakes, 0 stops) held for a duration in
+        milliseconds (0 to 65535, 0 the firmware's default). To stream, send
+        each frame with a duration longer than the gap to the next."""
+        raise NotImplementedError
+
+    def stop(self, device: str, timeout: Optional[float] = None) -> None:
+        """Stop every motor of *device* at once: an all-zero RTP frame."""
+        self.play_rtp(device, [0] * HAPTIC_MOTOR_COUNT, [0] * HAPTIC_MOTOR_COUNT, timeout)
+
+    def set_hall_range(self, device: str, hall_range: int,
+                       timeout: Optional[float] = None) -> str:
+        """Put every Hall sensor of *device* on *hall_range*: 0 is +-5 mT, 1
+        is +-50 mT. Its calibration is rescaled to it, and its raw messages
+        say it from then on. Returns what the change did to its calibration,
+        in words for a person ("" when there is nothing to say)."""
+        raise NotImplementedError
+
+    # ── calibration bounds ───────────────────────────────────────────────
+
+    @overload
+    def calibration(self, device: str, timeout: Optional[float] = None) -> Calibration: ...
+
+    @overload
+    def calibration(self, device: None = None,
+                    timeout: Optional[float] = None) -> Dict[str, Calibration]: ...
+
+    def calibration(self, device: Optional[str] = None, timeout: Optional[float] = None
+                    ) -> Union[Calibration, Dict[str, Calibration]]:
+        """The Hall bounds *device*'s curl is normalised between now, or with
+        no device named, every glove's in devices() by id. ServerError
+        "unknown_device" for a glove not known."""
+        if device is not None:
+            return self._calibration_of(device, timeout)
+        return {known.id: self._calibration_of(known.id, timeout)
+                for known in self.devices(timeout)}
+
+    def latest_calibration(self, device: str) -> Optional[Calibration]:
+        """The newest bounds known for *device* without asking; None when
+        there are none yet."""
+        raise NotImplementedError
+
+    def _calibration_of(self, device: str, timeout: Optional[float]) -> Calibration:
         raise NotImplementedError
 
     def close(self) -> None:

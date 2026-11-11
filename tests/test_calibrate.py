@@ -4,12 +4,11 @@ open and at another once it is a fist. What a calibration makes of real
 readings is pandora-core's own tests' business; these check what the command
 adds: picking the glove, what it says, what it sends, and the file it leaves."""
 import json
-import struct
 from types import SimpleNamespace
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import pytest
-from fakelink import Link, packet_line
+from fakelink import Link, packet_line, sent
 
 import pandora_sdk
 from pandora_core.calibration_session import Step, StepKind
@@ -17,7 +16,6 @@ from pandora_core.packet_layout import (
     GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_RANGE, HALL_TARGET_ALL,
     HAPTIC_MOTOR_COUNT, USB_HALL_CONFIG_FORMAT, USB_HAPTIC_RTP_FORMAT,
 )
-from pandora_core.serial_framing import decode_frame
 from pandora_sdk.calibrate import Outcome, _Screen, calibrate
 
 RIGHT, LEFT = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D"
@@ -33,11 +31,6 @@ def performance(*devices: str, seconds: float = 3.0, fist_from_s: float = 1.8) -
             for ms in range(0, int(seconds * 1000), 10) for device in devices]
 
 
-def sent(link: Link, kind: int, layout: str) -> List[Tuple]:
-    """The commands of type *kind* written to the port, unpacked, in order."""
-    payloads = [decode_frame(line) for line in link.written]
-    return [struct.unpack(layout, payload) for payload in payloads
-            if payload is not None and payload[0] == kind]
 
 
 def quiet(_text: str) -> None:

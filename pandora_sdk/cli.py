@@ -1,18 +1,21 @@
-"""The `pandora` command: look at hands, and calibrate a glove, without
-writing code.
+"""The `pandora` command: look at hands, calibrate a glove and update
+firmware, without writing code.
 
     pandora devices                      the gloves the app knows
     pandora watch --hand right           hands as they arrive, ten a second
     pandora watch --raw --rate 0         every raw packet
     pandora calibrate --hand right       calibrate a glove with no app running
     pandora watch --local                hands straight from the receiver
+    pandora update-firmware glove IMAGE  flash a glove (or the receiver)
 
-`devices` and `watch` read through the running app. `calibrate` and
-`watch --local` open the receiver themselves, so the app must not be running.
+`devices` and `watch` read through the running app. `calibrate`,
+`watch --local` and `update-firmware` open the receiver themselves, so the app
+must not be running.
 """
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from pathlib import Path
 from typing import List, Optional, Set
@@ -20,6 +23,7 @@ from typing import List, Optional, Set
 from pandora_core.calibration_session import Run
 from pandora_core.protocol import DEFAULT_PORT, HANDS, Frame, ProtocolError, Raw
 
+from pandora_sdk import firmware
 from pandora_sdk.calibrate import calibrate
 from pandora_sdk.client import connect
 from pandora_sdk.local import (Local, default_profiles_dir, load_profiles, open_link,
@@ -154,11 +158,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     cal.add_argument("--name", help="a label for the glove, kept in its profile")
     cal.add_argument("--no-haptics", action="store_true",
                      help="no buzz on the back of the hand when a step starts")
+
+    flash = commands.add_parser(
+        "update-firmware", parents=[port],
+        help="update the receiver's or a glove's firmware over the air, with no app",
+        description="Flash a signed firmware image onto the receiver or onto a glove "
+                    "through it, with the app closed, and wait until the new image is "
+                    "confirmed. The same update as the app's tools/ota_flash.py flash. "
+                    "Asks before writing anything unless --yes is given.")
+    flash.add_argument("target", choices=list(firmware.TARGETS),
+                       help="what to update (dongle is the receiver)")
+    flash.add_argument("image", help="dfu_application.zip, a signed .bin, or a build folder "
+                                     "holding dfu_application.zip")
+    flash.add_argument("--device", help="the glove's id (default: the only glove sending)")
+    flash.add_argument("--yes", "-y", action="store_true",
+                       help="flash without asking first")
+    flash.add_argument("--verbose", action="store_true",
+                       help="also print every line the receiver sends")
     args = parser.parse_args(argv)
 
     try:
         if args.command == "calibrate":
             return _calibrate(args)
+        if args.command == "update-firmware":
+            _speak_utf8()
+            return firmware.update_firmware(
+                args.target, args.image, port=args.receiver, device=args.device, yes=args.yes,
+                verbose=args.verbose, say=lambda text: print(text, flush=True))
         if getattr(args, "local", False):
             with _local(args) as gloves:
                 return _watch(gloves, args)
@@ -169,6 +195,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (PandoraError, ProtocolError, TimeoutError) as failed:
         print(f"pandora: {failed}", file=sys.stderr)
         return 1
+
+
+def _speak_utf8() -> None:
+    """pandora-core's firmware update prints emoji, from threads of its own,
+    which a Windows console's code page cannot always show: replace what it
+    cannot, rather than let the print fail."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 if __name__ == "__main__":
