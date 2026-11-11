@@ -11,6 +11,7 @@ from standin import wait
 
 import pandora_sdk
 from pandora_core import receiver
+from pandora_core.glove import Glove
 from pandora_core.packet_layout import (
     GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_ROM, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_FILTER,
     HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_RANGE_5MT, HALL_RANGE_50MT, HALL_TARGET_ALL,
@@ -428,3 +429,140 @@ def test_the_debug_stream_has_the_values_of_every_stage_when_asked_for_all(link,
     stages = {name.split(".")[0] for name in gloves.read("debug", timeout=2.0).values}
 
     assert {"raw", "curl", "splay"} <= stages
+
+
+# ── raw only: no hand made when none is asked for ────────────────────────────
+
+@pytest.fixture
+def pushes(monkeypatch):
+    """Every packet a glove's pipeline is given: (the pipeline, device id,
+    glove_ms), in order."""
+    given = []
+    push = Glove.push_decoded
+
+    def _counted(glove, packet):
+        given.append((glove, packet.device_id, packet.timestamp))
+        return push(glove, packet)
+
+    monkeypatch.setattr(Glove, "push_decoded", _counted)
+    return given
+
+
+def feed(link, gloves, *lines):
+    """Feed *lines* and wait until the reader has handled them all."""
+    before = gloves.packets
+    link.feed(*lines)
+    assert wait(lambda: gloves.packets == before + len(lines))
+
+
+@pytest.mark.parametrize("streams", [(), ("raw",)])
+def test_with_neither_frames_nor_debug_asked_for_a_glove_skips_the_pipeline(
+        link, gloves, pushes, streams):
+    """Only its first packet goes through: that loads the glove's profile,
+    which calibration() reads."""
+    for stream in streams:
+        gloves.subscribe(stream)
+
+    feed(link, gloves, *(packet_line(RIGHT, glove_ms=ms) for ms in range(1, 6)))
+
+    assert [ms for _, _, ms in pushes] == [1]
+
+
+def test_a_glove_no_frames_subscription_includes_skips_the_pipeline(link, gloves, pushes):
+    gloves.subscribe(hands=["right"], bones=False)
+
+    feed(link, gloves, *(packet_line(device, glove_ms=ms)
+                         for ms in range(1, 4) for device in (LEFT, RIGHT)))
+
+    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+    assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3]
+
+
+def test_frames_asked_for_late_come_from_a_new_pipeline_started_at_that_packet(
+        link, gloves, pushes):
+    """Its filters begin there, as for a glove just switched on; none of them
+    carries anything over from the packets before."""
+    gloves.subscribe("raw")
+    feed(link, gloves, *(packet_line(RIGHT, glove_ms=ms) for ms in range(1, 4)))
+
+    gloves.subscribe(bones=False)
+    feed(link, gloves, packet_line(RIGHT, glove_ms=4), packet_line(RIGHT, glove_ms=5))
+
+    assert gloves.read(timeout=2.0).seq == 4
+    pipeline = {ms: glove for glove, _, ms in pushes}
+    assert sorted(pipeline) == [1, 4, 5]
+    assert pipeline[4] is not pipeline[1] and pipeline[5] is pipeline[4]
+
+
+# ── a callback per message ───────────────────────────────────────────────────
+
+def test_a_callback_gets_each_raw_message_on_the_reader_thread_as_it_is_made(link, gloves):
+    called = []
+    gloves.on("raw", lambda reading: called.append((reading.seq, threading.current_thread())))
+    gloves.subscribe("raw")
+
+    feed(link, gloves, packet_line(RIGHT), packet_line(RIGHT))
+
+    assert [seq for seq, _ in called] == [1, 2]
+    assert {thread.name for _, thread in called} == {"pandora-sdk-receiver"}
+
+
+def test_messages_a_callback_takes_are_not_queued_but_latest_has_them(link, gloves):
+    gloves.on("raw", lambda reading: None)
+    gloves.subscribe("raw")
+
+    feed(link, gloves, *([packet_line(RIGHT)] * 300))
+
+    assert gloves.latest(RIGHT, "raw").seq == 300
+    assert gloves.dropped == 0
+    with pytest.raises(TimeoutError):
+        gloves.read("raw", timeout=0.05)
+
+
+def test_with_its_callback_removed_a_stream_is_queued_again(link, gloves):
+    called = []
+    gloves.on("raw", called.append)
+    gloves.subscribe("raw")
+    feed(link, gloves, packet_line(RIGHT))
+
+    gloves.on("raw", None)
+    feed(link, gloves, packet_line(RIGHT))
+
+    assert [reading.seq for reading in called] == [1]
+    assert gloves.read("raw", timeout=2.0).seq == 2
+
+
+def test_a_callback_can_send_to_the_glove_and_read_its_calibration(link, clock):
+    """It runs on the reader thread, inside the reader's handling of the
+    packet; asking the source for something must not wait on that. From the
+    glove's very first packet, its calibration is its profile's."""
+    seen = []
+    with pandora_sdk.Local(CALIBRATED, link=link, defaults={}, clock=clock) as gloves:
+        def _tapped(reading):
+            gloves.play_rom(reading.device, [0, 47, 0, 0, 0, 0])
+            seen.append(gloves.calibration(reading.device).calibrations["Index"]["prox_min"])
+
+        gloves.on("raw", _tapped)
+        gloves.subscribe("raw", devices=[RIGHT])
+        feed(link, gloves, packet_line(RIGHT))
+
+    assert seen == [(-800.0, 140.0, 2200.0)]
+    assert len(sent(link, GLOVE_PKT_HAPTIC_ROM, USB_HAPTIC_ROM_FORMAT)) == 1
+
+
+def test_a_callback_that_raises_ends_the_source_with_its_error(link, gloves):
+    def _broken(reading):
+        raise ValueError("no such key")
+
+    gloves.on("raw", _broken)
+    gloves.subscribe("raw")
+    gloves.subscribe(bones=False)
+    link.feed(packet_line(RIGHT))
+
+    with pytest.raises(pandora_sdk.Disconnected, match="callback for raw raised.*no such key"):
+        gloves.read(timeout=2.0)
+
+
+def test_a_callback_for_a_stream_that_does_not_exist_is_refused(gloves):
+    with pytest.raises(ValueError, match="no stream 'hands'"):
+        gloves.on("hands", print)

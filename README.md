@@ -52,9 +52,16 @@ pip install --force-reinstall git+https://github.com/Pandora-On-Zero/pandora-sdk
 Without it pip may keep the `pandora-core` it already has, even with
 `--upgrade`: pip judges an installed package by its version number, not by the
 commit it came from, and keeps one whose version is the one asked for. That is
-why each move of the pin raises the core's version (see
+why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
 This version needs `pandora-core` 0.2.0.
+
+Version 0.2.0 covers two commits of the core: `45c367d`, which the previous
+`pandora-sdk` pinned, and `7f0e318`, pinned now (the frame checksum computed in
+C, which makes reading a packet about five times faster, and a write timeout on
+the receiver's port). A fresh install gets the newer one. An install that
+already has 0.2.0 keeps whichever commit it has until you reinstall with
+`--force-reinstall`.
 
 ## Before you connect
 
@@ -93,7 +100,8 @@ it; two gloves can be worn on the same hand.
 | `bones` | `True` | Whether each frame carries the 31-bone skeleton, which is most of its size |
 | `keys` | `["*"]` | Debug only: which values, as name patterns (`*` any run of characters, `?` one) |
 
-There are two ways to take what arrives.
+There are two ways to take what arrives, and a third for a program that must
+not wait on a queue ([a callback](#a-callback-per-message)).
 
 **Every frame, in order**, for logging or anything that must not skip:
 
@@ -141,6 +149,40 @@ for reading in gloves.raw():
 
 A raw reading has the same `device`, `hand`, `seq`, `time_us` and
 `wall_time_us` as a frame, and `hall_range`, the range its counts are in.
+
+### A callback per message
+
+`on(stream, callback)` hands each message of a stream to your function as it
+arrives, on the thread that reads the app's socket or the receiver, instead of
+queueing it. For a program where every millisecond counts, such as one that
+turns finger taps into key presses:
+
+```python
+import pandora_sdk
+
+PRESSED = 1500                           # your own threshold, in Hall counts
+
+def on_reading(reading):                 # runs on the reading thread: keep it short
+    if abs(reading.hall[1][0][2]) > PRESSED:     # index finger, proximal sensor, z
+        tap("z")                         # yours: press the key
+
+with pandora_sdk.open_receiver() as gloves:
+    gloves.on("raw", on_reading)
+    gloves.subscribe("raw", hands=["right"])
+    input("Tapping. Enter to stop.\n")
+```
+
+- Nothing else arrives while your function runs, so do the least you can
+  there and hand anything slow to another thread.
+- `latest()` still has the stream's messages; `read()` and the iterators get
+  none of them. `gloves.on("raw", None)` goes back to queueing.
+- Your function can call the source: send haptics, ask for `calibration()`.
+- If it raises, the source ends: the error is logged, and the next read raises
+  `Disconnected` saying what your function raised.
+- It works the same through the app (`connect()`) and without it.
+
+With `open_receiver()` and only `raw` subscribed, as here, no hand is made at
+all: see [Raw only](#raw-only).
 
 ### Calibration bounds
 
@@ -207,7 +249,7 @@ setting, which goes back to the glove when it next connects.
 
 `open_receiver()` reads the receiver itself and runs each glove's pipeline in
 your process. Everything after that line is the same as with `connect()`:
-`subscribe`, `frames`, `raw`, `debug`, `read`, `latest`, `devices`,
+`subscribe`, `frames`, `raw`, `debug`, `read`, `latest`, `on`, `devices`,
 `calibration`, `latest_calibration`, the commands for a glove, and the same
 frames.
 
@@ -256,6 +298,24 @@ What is different without the app:
 One thread runs every glove's pipeline. On the PC this was written on, a
 packet takes about a millisecond with both streams and the skeleton on, and a
 glove sends 200 a second.
+
+#### Raw only
+
+A glove's pipeline runs only while a `frames` or `debug` subscription includes
+it. With neither (only `raw`, or nothing yet), each packet makes the raw
+message and nothing else: about 30 microseconds a packet on the PC this was
+written on, against 0.6 to 1.9 milliseconds with the pipeline. A frames
+subscription narrowed to one hand or one glove leaves the others raw only.
+
+- `calibration()`, `latest_calibration()` and `set_hall_range` work as
+  ever: a glove's first packet, and its first after a range change, still go
+  through a pipeline, which loads its profile and its range.
+- **Subscribing to frames later starts that glove's pipeline afresh at the
+  next packet**, as when the glove is switched on: its smoothing and other
+  filters begin there and carry nothing from before. Starting costs a
+  millisecond or two, once, on that packet.
+- Through the app nothing changes: the app makes hands either way.
+
 
 ### When things go wrong
 
@@ -411,8 +471,16 @@ commit you pin must carry a higher `pandora-core` version** (its
 `pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
 installed core whose version matches, whatever commit it came from, so a pin
 to a new commit with the same version leaves people on the old core. The pin
-is at 0.2.0 now. Then install again with
-`pip install --force-reinstall -e ".[dev]"`.
+is at 0.2.0 now, and has been for two commits: the move from `45c367d` to
+`7f0e318` kept the core's version, so only a fresh install or a
+`--force-reinstall` gets the newer commit (see [Installing](#installing)).
+Then install again with `pip install --force-reinstall -e ".[dev]"`, or, to
+replace only the core, as this repository's `.venv` was:
+
+```bash
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
+  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@7f0e318a1c9ab79fe348f23da25bf722172cc204#subdirectory=pandora-core"
+```
 
 ## Not here yet
 

@@ -341,3 +341,27 @@ def test_debug_messages_come_from_their_iterator_and_as_the_latest(app, gloves):
     assert next(gloves.debug()).seq == 1
     assert gloves.read().seq == 7
     assert gloves.latest("right", "debug").seq == 2
+
+
+# ── a callback per message ───────────────────────────────────────────────────
+
+def test_a_callback_gets_each_raw_message_on_the_reader_thread(app, gloves):
+    called = []
+    gloves.on("raw", lambda reading: called.append((reading.seq, threading.current_thread())))
+
+    app.send(raw(seq=1), raw(seq=2))
+
+    assert wait(lambda: len(called) == 2)
+    assert [seq for seq, _ in called] == [1, 2]
+    assert {thread.name for _, thread in called} == {"pandora-sdk-reader"}
+
+
+def test_a_callback_that_raises_ends_the_connection_with_its_error(app, gloves):
+    def _broken(reading):
+        raise ValueError("no such key")
+
+    gloves.on("raw", _broken)
+    app.send(raw(), frame())
+
+    with pytest.raises(pandora_sdk.Disconnected, match="callback for raw raised.*no such key"):
+        gloves.read(timeout=2.0)

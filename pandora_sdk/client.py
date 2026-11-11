@@ -28,8 +28,8 @@ from pandora_core import protocol
 from pandora_core.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
                                    ProtocolError, Subscription)
 
-from pandora_sdk.source import (ConnectionFailed, Disconnected, PandoraError, ServerError,
-                                Source)
+from pandora_sdk.source import (CallbackFailed, ConnectionFailed, Disconnected, PandoraError,
+                                ServerError, Source)
 
 __all__ = ["Client", "ConnectionFailed", "Disconnected", "PandoraError", "Server",
            "ServerError", "connect"]
@@ -206,7 +206,8 @@ class Client(Source):
     # ── the socket ───────────────────────────────────────────────────────
 
     def _read_socket(self) -> None:
-        """The reader thread: sort what arrives until the connection ends."""
+        """The reader thread: sort what arrives until the connection ends, or
+        a callback (on()) raises."""
         why = "the app closed the connection"
         try:
             for message in self._socket:
@@ -216,6 +217,8 @@ class Client(Source):
                     self._on_binary(bytes(message))
         except ConnectionClosed as closed:
             why = f"the connection to the app was lost ({closed})"
+        except CallbackFailed as failed:
+            why = str(failed)
         self._end(why)
 
     def _on_text(self, text: str) -> None:
