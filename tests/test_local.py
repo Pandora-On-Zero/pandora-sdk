@@ -2,21 +2,27 @@
 a made-up serial link. The packets are built here from the tracking packet's
 layout; what the pipeline makes of real ones is pandora-core's own tests'
 business. These check the plumbing around it."""
+import base64
 import json
 import threading
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fakelink import Link, packet_line, sent
 from standin import wait
 
 import pandora_sdk
-from pandora_core import receiver
+from pandora_core import protocol, receiver
+from pandora_core.finger_normalizer import CurlInterpolationMode, FingerInterpolator
 from pandora_core.glove import Glove
+from pandora_core.packet_decoder import PacketDecoder, SensorReading
 from pandora_core.packet_layout import (
     GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_ROM, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_FILTER,
     HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_RANGE_5MT, HALL_RANGE_50MT, HALL_TARGET_ALL,
     USB_HALL_CONFIG_FORMAT, USB_HAPTIC_ROM_FORMAT, USB_HAPTIC_RTP_FORMAT,
 )
+from pandora_core.serial_framing import encode_frame
 from pandora_sdk import Device, Subscription
 
 RIGHT, LEFT, STRANGER = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D", "NRF_GLOVE_0000"
@@ -492,6 +498,166 @@ def test_frames_asked_for_late_come_from_a_new_pipeline_started_at_that_packet(
     pipeline = {ms: glove for glove, _, ms in pushes}
     assert sorted(pipeline) == [1, 4, 5]
     assert pipeline[4] is not pipeline[1] and pipeline[5] is pipeline[4]
+
+
+# ── raw counts after earth-field cancellation ────────────────────────────────
+
+def test_a_raw_subscription_can_ask_for_the_cancelled_counts(gloves):
+    assert gloves.subscribe("raw", cancelled=True) == Subscription("raw", cancelled=True)
+    assert gloves.subscribe("raw").cancelled is False
+
+
+def test_a_cancelled_that_is_not_true_or_false_is_refused_as_the_app_refuses_it(gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.subscribe("raw", cancelled=cast(Any, "yes"))
+
+    assert refused.value.code == "bad_cancelled"
+
+
+def test_a_plain_raw_subscription_carries_no_cancelled_counts(link, gloves):
+    gloves.subscribe("raw")
+
+    link.feed(packet_line(RIGHT))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert (reading.hall_cancelled, reading.thumb_distal_cancelled, reading.earth_cancelled) == (
+        None, None, None)
+
+
+def test_with_no_earth_cancellation_the_cancelled_counts_are_the_gloves_own(link, gloves):
+    """The profiles here switch cancellation on for no glove."""
+    gloves.subscribe("raw", cancelled=True)
+
+    link.feed(packet_line(RIGHT))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert reading.earth_cancelled is False
+    assert (reading.hall_cancelled, reading.thumb_distal_cancelled) == (
+        reading.hall, reading.thumb_distal)
+    assert reading.hall[1][0] == (112, 113, 114)
+
+
+def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, gloves, pushes):
+    """Cancellation happens in the pipeline, and carries state from packet to
+    packet, so each packet goes through it as with frames."""
+    gloves.subscribe("raw", cancelled=True, hands=["right"])
+
+    feed(link, gloves, *(packet_line(device, glove_ms=ms)
+                         for ms in range(1, 6) for device in (LEFT, RIGHT)))
+
+    assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3, 4, 5]
+    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+
+
+# A real glove with earth-field cancellation on: tests/data/right_earth.json,
+# recorded packets copied from pandora-core's golden vectors.
+EARTH = json.loads((Path(__file__).parent / "data" / "right_earth.json").read_text(
+    encoding="utf-8"))
+EARTH_PAYLOADS = [base64.b64decode(packet) for packet in EARTH["packets"]]
+EARTH_DEVICE = "NRF_GLOVE_CC8C"
+EARTH_PROFILE = {"hand": EARTH["hand"], **EARTH["device"]}
+
+
+def read_all(gloves, stream, count):
+    return [gloves.read(stream, timeout=5.0) for _ in range(count)]
+
+
+def earth_raw(link, subscriptions, tuning=None):
+    """Every raw message Local makes of the earth vector's packets, with
+    *subscriptions* (keyword arguments for subscribe) in place from the
+    first; the frames, when one subscription is to them; and the glove's
+    calibration bounds."""
+    with pandora_sdk.Local({EARTH_DEVICE: EARTH_PROFILE}, link=link,
+                           tuning=tuning or EARTH["tuning"]) as gloves:
+        for subscription in subscriptions:
+            gloves.subscribe(**subscription)
+        link.feed(*(encode_frame(payload) for payload in EARTH_PAYLOADS))
+        raws = read_all(gloves, "raw", len(EARTH_PAYLOADS))
+        frames = (read_all(gloves, "frames", len(EARTH_PAYLOADS))
+                  if any(s.get("stream", "frames") == "frames" for s in subscriptions) else [])
+        bounds = gloves.calibration(EARTH_DEVICE)
+    return raws, frames, bounds
+
+
+def the_gloves_own(payload):
+    """A packet's raw message before any pipeline has touched it."""
+    packet = PacketDecoder().decode_packet(payload)
+    assert packet is not None
+    return protocol.decode_raw(protocol.encode_raw(packet, "right", 0, 0))
+
+
+@pytest.mark.parametrize("subscriptions", [
+    [{"stream": "raw"}],
+    [{"stream": "raw", "cancelled": True}],
+    [{"stream": "raw"}, {"bones": False}],
+    [{"stream": "raw", "cancelled": True}, {"bones": False}],
+], ids=["raw", "raw-cancelled", "raw-and-frames", "raw-cancelled-and-frames"])
+def test_hall_is_the_gloves_own_counts_whatever_else_is_asked_for(link, subscriptions):
+    raws, _, _ = earth_raw(link, subscriptions)
+
+    for reading, payload in zip(raws, EARTH_PAYLOADS):
+        own = the_gloves_own(payload)
+        assert (reading.hall, reading.thumb_distal, reading.reference) == (
+            own.hall, own.thumb_distal, own.reference)
+
+
+def test_with_earth_cancellation_on_the_cancelled_counts_are_the_apps(link):
+    """What the app's server sends for the same packets: the glove's pipeline
+    over every one of them, then the core's encode_raw on the packet after
+    it (SoftwareInterface/services/protocol_server.py)."""
+    raws, _, _ = earth_raw(link, [{"stream": "raw", "cancelled": True}])
+    decoder = PacketDecoder()
+    apps = []
+    with Glove(EARTH_PROFILE, EARTH["tuning"]) as glove:
+        for payload in EARTH_PAYLOADS:
+            packet = decoder.decode_packet(payload)
+            assert packet is not None
+            glove.push_decoded(packet)
+            apps.append(protocol.decode_raw(protocol.encode_raw(
+                packet, "right", 0, 0, cancelled=True)))
+
+    assert [r.earth_cancelled for r in raws] == [True] * len(EARTH_PAYLOADS)
+    for reading, app in zip(raws, apps):
+        assert reading.hall_cancelled != reading.hall
+        assert (reading.hall_cancelled, reading.thumb_distal_cancelled) == (
+            app.hall_cancelled, app.thumb_distal_cancelled)
+        assert reading.hall == app.hall         # the vector has gap fill off
+
+
+def test_the_cancelled_counts_between_the_calibration_bounds_give_the_frames_curl(link):
+    """They are in the counts of calibration()'s bounds: mapped between them
+    with the curve the glove's profile names, they are the frame's curl. The
+    glove's own counts are not, with cancellation on."""
+    raws, frames, bounds = earth_raw(link, [{"stream": "raw", "cancelled": True},
+                                            {"bones": False}])
+    reading, frame = raws[-1], frames[-1]
+    assert reading.seq == frame.seq and reading.hall_cancelled is not None
+
+    def mapped(counts, finger, slot):
+        sensor = bounds.calibrations[finger]
+        return FingerInterpolator()._interpolate_curl(
+            SensorReading(*counts), SensorReading(*sensor[f"{slot}_min"]),
+            SensorReading(*sensor[f"{slot}_max"]), CurlInterpolationMode.CUBE_ROOT_A).to_curl()
+
+    sensors = [(i, finger, j, slot) for i, finger in enumerate(protocol.FINGERS)
+               for j, slot in enumerate(("prox", "meta"))]
+    assert EARTH["device"]["sections"]["CURL"]["interpolation_mode"] == "cube_root_a"
+    for i, finger, j, slot in sensors:
+        assert mapped(reading.hall_cancelled[i][j], finger, slot) == frame.curl[i][j]
+    assert any(mapped(reading.hall[i][j], finger, slot) != frame.curl[i][j]
+               for i, finger, j, slot in sensors)
+
+
+def test_with_gap_fill_on_a_dead_sensor_keeps_its_own_zeros_in_hall(link):
+    """The vector's thumb proximal sensor reads all zeros. Gap fill gives the
+    pipeline a neighbour's reading for it, which the cancelled counts carry;
+    hall stays what the glove sent."""
+    raws, _, _ = earth_raw(link, [{"stream": "raw", "cancelled": True}],
+                           tuning={**EARTH["tuning"], "hall_gap_fill": True})
+
+    reading = raws[-1]
+    assert reading.hall[0][0] == (0, 0, 0)
+    assert reading.hall_cancelled is not None and reading.hall_cancelled[0][0] != (0, 0, 0)
 
 
 # ── a callback per message ───────────────────────────────────────────────────

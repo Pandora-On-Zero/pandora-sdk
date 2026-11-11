@@ -1,0 +1,318 @@
+{
+ "format": 1,
+ "name": "right_earth",
+ "source": "the first 40 packets of pandora-core's shared/golden/right_earth.json at Pandora commit 661b64c, without its expected hands. That vector: every 2nd packet of right_recorded, with a made-up reference field: earth-field cancellation and heading fusion on, one sensor on the 50 mT range",
+ "hand": "right",
+ "device": {
+  "sections": {
+   "CURL": {
+    "curl_source": "prox",
+    "thumb_remap": false,
+    "interpolation_mode": "cube_root_a",
+    "joint_interpolation": {},
+    "mag_range": 0,
+    "calibrations": {
+     "Thumb": {
+      "prox_min": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 0.0
+      },
+      "prox_max": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 0.0
+      },
+      "meta_min": {
+       "x": -1917.0,
+       "y": -2881.0,
+       "z": 186.0
+      },
+      "meta_max": {
+       "x": 8949.0,
+       "y": -10306.0,
+       "z": 2431.0
+      },
+      "distal_min": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 0.0
+      },
+      "distal_max": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 0.0
+      },
+      "imu_neutral": {
+       "hand_euler": [
+        0.88,
+        152.84,
+        19.43
+       ],
+       "finger_euler": [
+        -2.7,
+        -0.41,
+        -15.92
+       ],
+       "captured_at": "2026-10-19T17:41:24"
+      }
+     },
+     "Index": {
+      "prox_min": {
+       "x": -1076.0,
+       "y": -543.0,
+       "z": 1274.0
+      },
+      "prox_max": {
+       "x": 188.0,
+       "y": -1060.0,
+       "z": 894.0
+      },
+      "meta_min": {
+       "x": -628.0,
+       "y": 429.0,
+       "z": -441.0
+      },
+      "meta_max": {
+       "x": 32488.0,
+       "y": 12548.0,
+       "z": -3596.0
+      },
+      "imu_neutral": {
+       "hand_euler": [
+        -3.25,
+        137.14,
+        44.91
+       ],
+       "finger_euler": [
+        21.41,
+        62.3,
+        48.66
+       ],
+       "captured_at": "2026-10-28T22:01:42"
+      }
+     },
+     "Middle": {
+      "prox_min": {
+       "x": -1305.0,
+       "y": 245.0,
+       "z": -54.0
+      },
+      "prox_max": {
+       "x": -751.0,
+       "y": -1485.0,
+       "z": -1059.0
+      },
+      "meta_min": {
+       "x": -413.0,
+       "y": 885.0,
+       "z": -391.0
+      },
+      "meta_max": {
+       "x": 32519.0,
+       "y": 32519.0,
+       "z": 3780.0
+      },
+      "imu_neutral": {
+       "hand_euler": [
+        -3.25,
+        137.14,
+        44.91
+       ],
+       "finger_euler": [
+        22.73,
+        58.47,
+        64.31
+       ],
+       "captured_at": "2026-10-28T22:01:42",
+       "flexion_axis": [
+        0.9423528440308349,
+        -0.1467678068342672,
+        -0.30071635842444006
+       ]
+      }
+     },
+     "Ring": {
+      "prox_min": {
+       "x": -596.0,
+       "y": 445.0,
+       "z": 630.0
+      },
+      "prox_max": {
+       "x": 908.0,
+       "y": 614.0,
+       "z": -262.0
+      },
+      "meta_min": {
+       "x": -291.0,
+       "y": -404.0,
+       "z": -84.0
+      },
+      "meta_max": {
+       "x": -8989.0,
+       "y": 14474.0,
+       "z": 2583.0
+      },
+      "imu_neutral": {
+       "hand_euler": [
+        -3.25,
+        137.14,
+        44.91
+       ],
+       "finger_euler": [
+        14.32,
+        57.0,
+        42.65
+       ],
+       "captured_at": "2026-10-28T22:01:42"
+      }
+     },
+     "Pinky": {
+      "prox_min": {
+       "x": -996.0,
+       "y": 987.0,
+       "z": -516.0
+      },
+      "prox_max": {
+       "x": 15438.0,
+       "y": -6121.0,
+       "z": -5949.0
+      },
+      "meta_min": {
+       "x": 22.0,
+       "y": -12.0,
+       "z": 371.0
+      },
+      "meta_max": {
+       "x": 32557.0,
+       "y": 32557.0,
+       "z": 1388.0
+      },
+      "imu_neutral": {
+       "hand_euler": [
+        -3.25,
+        137.14,
+        44.91
+       ],
+       "finger_euler": [
+        23.41,
+        68.88,
+        76.88
+       ],
+       "captured_at": "2026-10-28T22:01:42"
+      }
+     }
+    }
+   },
+   "EARTH": {
+    "enabled": true,
+    "finger": "Reference",
+    "sensor": "Prox",
+    "soft_iron": [
+     [
+      1.1,
+      0.0,
+      0.02
+     ],
+     [
+      0.0,
+      0.9,
+      0.05
+     ],
+     [
+      0.02,
+      0.05,
+      1.0
+     ]
+    ],
+    "native_hard_iron": [
+     120.0,
+     -300.0,
+     45.0
+    ],
+    "native_mag_range": 0
+   },
+   "POSITIONING": null
+  },
+  "range": 0,
+  "sensor_ranges": {
+   "Index/Meta": 1
+  }
+ },
+ "tuning": {
+  "splay_recenter": {
+   "enabled": true,
+   "still_s": 1.0,
+   "rate_deg_s": 0.15,
+   "motion_deg_s": 15.0,
+   "imu_splay": false
+  },
+  "mag_heading": {
+   "enabled": true,
+   "time_constant_s": 10.0,
+   "norm_tolerance": 0.15
+  },
+  "imu_yaw_offset": 0.0,
+  "hall_gap_fill": false,
+  "earth_tuning": {
+   "left": {
+    "apply_soft_iron": true,
+    "iterative": true,
+    "iterations": 2,
+    "damping": 0.5,
+    "reference_smoothing": 0.8,
+    "output_smoothing": 0.0
+   },
+   "right": {
+    "apply_soft_iron": true,
+    "iterative": true,
+    "iterations": 2,
+    "damping": 0.5,
+    "reference_smoothing": 0.0,
+    "output_smoothing": 0.8
+   }
+  }
+ },
+ "packets": [
+  "AU5SRl9HTE9WRV9DQzhDAAAkYSIBMgDX+/z3wgMAAAAAAAAAAAAAAABmAVz/+v8s/WD9BQSQEeMWwfez+ZH83P4//4MPVf9h/e0BgAITfxN/cQICEtn4yvoACAAIAIX3qD+SBtb/lwEr/5f/7g6W3R0SP9JTA1DveAWTFfrqo/U/FpDxP/ghGoTy7fw=",
+  "AU5SRl9HTE9WRV9DQzhDAABKYSIBMgBz/M341QMAAAAAAAAAAAAAAABwAVD/9f8+/XL9BwSxECAWr/d8+XH84f5//xEQ2/5+/QcCaAIXfxd/CwGlEMn5/voACAAIAMb3Qz/BBtb/lgEt/5f/7g6b3pYP7tQyA4bveAXHFbvrO/ZUFrHyLfnoGRHzpv0=",
+  "AU5SRl9HTE9WRV9DQzhDAABvYSIBMgAM/An31AMAAAAAAAAAAAAAAACFAS7/+P9A/Wn9EATDD6IUhfcz+XP80f5aAPsQa/67/ScCFwInfyd/SvotEKj5v/oACAAIAM/3rj4TB9b/lQEx/5f/7g5f3wwSD9N1A5TwlAVjFlPslvbjFoz0Z/qCGgX0g/4=",
+  "AU5SRl9HTE9WRV9DQzhDAACUYSIBMgBo/BL3JwQAAAAAAAAAAAAAAACpAR7//f93/Xj9LwSgDy4TZfea+Zn8cf7W//ERcv76/TACbAEgfyB/0AQhEHX6XfoACAAIAAT5nj10B9b/lAE2/5f/7g4f4WgUWtIKAwbzjAUaFlLv7PhQFoT3WPw2Gtv4kgI=",
+  "AU5SRl9HTE9WRV9DQzhDAAC7YSIBMgA//Nn1NgQAAAAAAAAAAAAAAACKATj/BQCq/Yj9NQQwDv0Pyvfk+dT8Sv6W/34Qa/4m/nsC5wAefx5/Hwt+Dwr7KfoACAAIAP76ADwlCNb/kAE//5f/7g564REnD8GmAdj0mAXGFM/xaPu/FHH5Tf7DGKv8pAY=",
+  "AU5SRl9HTE9WRV9DQzhDAADgYSIBMgAp/PT1JQQAAAAAAAAAAAAAAABZAVr/DADM/Y39MQSIC+cLsvhK+tz8QP5z/+oMf/5Y/q4CxQAnfyd/Gv65DQr8DfoACAAIAIX9HjrzCNb/jAFJ/5f/7g6K48wu4UWj/yD2swWsEpvzfv2NEg/6x/9/Fq39+Qg=",
+  "AU5SRl9HTE9WRV9DQzhDAAAFYiIBMgAf/Br2FgQAAAAAAAAAAAAAAAAZAYX/EgDl/ZP9UQRQCZcJafm7+h39Vv5D/18Khf5l/sICywAif31OUPQODdf9FPoACAAIAGf/gjhBCtb/hQFZ/5f/7g7l5f0whkPm/Qv3eAaoEJT0oP9tEEr6nAFwFLn9Jws=",
+  "AU5SRl9HTE9WRV9DQzhDAAAqYiIBMgCM/Av2UAQAAAAAAAAAAAAAAAAFAZr/EgDO/YX9WATnB18I5fkH+zb9bv4t/4wIrv5d/rwC/AAof+MzmPGtDI/+TvoACAAIAEYAZDf2C9b/egFt/5f/7g5n5ywvxLkH/cf3zAenDxH1swGRD4X6nAOUE6D9KQ0=",
+  "AU5SRl9HTE9WRV9DQzhDAABPYiIBMgAE/aX1mAQAAAAAAAAAAAAAAAD6AKr/EwC//XT9bASwBh4HYvpS+0n9l/4d/zwHxP5D/oACQgGYfMEr5PHrC6T+uvoACAAIAKgAZDYlDtb/agGF/5f/7g7I6I8tZb21/Mb4qgn1DoP1OgQmD9n6JgZIE7r9ug8=",
+  "AU5SRl9HTE9WRV9DQzhDAAB0YiIBMgDm/X71CAUAAAAAAAAAAAAAAAD2ALr/EADU/Vf9jAT/BZAGtvqF+1z9q/4G/0QGxP45/nQCbAFWbggm7vE0C3b+3/oACAAIACQBeDUvENb/WQGb/5f/7g5B6r4susBU/MT5hwsxDgb2tQb1DZL7wwieEiT+WhI=",
+  "AU5SRl9HTE9WRV9DQzhDAACaYiIBMgCz/k31jwUAAAAAAAAAAAAAAAD6AML/DgDB/S39fARxBVIG3fqc+279uv7y/voF5P5D/mkCZwG/a/EjJPIBC1/+9voACAAIAH4BhjQLEtb/SAGs/5f/7g6o60UsN8Sk/D37LQ3pDTb3UAlYDfb8UQs7EnT/OhU=",
+  "AU5SRl9HTE9WRV9DQzhDAAC/YiIBMgCR/7nzQQYAAAAAAAAAAAAAAAAKAdH/CQDZ/RL9dwSeBW4G2PrN+zn9pv77/kQGtP57/n0CdgE4bd8h/PB9C3f90/oACAAIAKYBxTPoE9b/NQG9/5f/7g5v7AEr8chO/fv9AQ/KDd75wwx4DK3/YA7zEc8Bmxg=",
+  "AU5SRl9HTE9WRV9DQzhDAADkYiIBMgAeA83uYwgAAAAAAAAAAAAAAAB1AfL//v9b/u38kwRhB2wHzfn8+5/8Tv4P/0kIpf4x/5oCZwEpf+cw8e4ZDR37bvoACAAIAN8BbjNHFdb/JgHI/5f/7g7o7O8rlM2L/WEDCxF6DeT+JhHXCnwEShHBEX4Gahw=",
+  "AU5SRl9HTE9WRV9DQzhDAAAJYyIBMgDRCenoLgoAAAAAAAAAAAAAAAC9AkUA4v/k/tf8ewRqC1II8/dz/RP8zv1w/jMMDf9uAOsBMAEcf/5O6vH2Dg/0Y/kACAAIABgCmTP0Fdb/HwHN/5f/7g6r7CcsWtN6/WwKGBMtDCwGSxY3CgcLrhO3Ec8NuiA=",
+  "AU5SRl9HTE9WRV9DQzhDAAAuYyIBMgDLFITfyQoAAAAAAAAAAAAAAACsBiEBtf+y/238EAQ0GuEJNfJh/8f7H/1G+3ETqABTAfIAkQAdfx1/1yj9EILtIvgACAAIAD8CfjN6Ftb/GQHR/5f/7g7m7NYtXddX/j0RVhU8ClwN8RrhCXERzhWuEN4UGyQ=",
+  "AU5SRl9HTE9WRV9DQzhDAABTYyIBMgC0INvWdgoAAAAAAAAAAAAAAABdDLkBfv8AABf8yAPKMLEMwOooACj7WfyF9xocCQPhAYgA6P8mfyZ/uj4vFrfiCPMACAAIACkCDzNWF9b/DwHX/5f/7g5W7HEtT9xG/yUW2ReBCLESWB73CDoWKRdGD+YZeCY=",
+  "AU5SRl9HTE9WRV9DQzhDAAB4YyIBMgBBJ8TSHwoAAAAAAAAAAAAAAACyDJf7EP2RACn8pQPGRfkQjeZJAKj6BPzX87ojNQVDAiIAff8nfyd/T1COF7va9+4ACAAIADICLTLzF9b/CAHb/5f/7g506xAsHeDA/mYZyxjrBgoWOSBACLAZYRjxDWAdEig=",
+  "AU5SRl9HTE9WRV9DQzhDAACdYyIBMgAyKgzQ4QkAAAAAAAAAAAAAAACyDIX7/PzDACb8qAOSU5Ucq+csAGD6qvsg8cgnhAaYAi0AO/8efx5/mFNeFyXUAewACAAIAHgC7jAaGNb/BgHc/5f/7g5w6/Qs0OBU/qsbGBluBQwYDSEDB+QbdRhsDIYf3ig=",
+  "AU5SRl9HTE9WRV9DQzhDAADCYyIBMgAbK8nOrgkAAAAAAAAAAAAAAACyDIf71vzcAA38gANNWvclp+rm/4f6nfsJ75AqZAe2AnkAGv8UfxR/C1uCGBTS3uoACAAIAMIC2i8dGNb/BgHc/5f/7g6461AuKuAx/l4dWBl1BC8ZciEHBk4dVBgrC7ggPyk=",
+  "AU5SRl9HTE9WRV9DQzhDAADnYyIBMgCAKRXPvQkAAAAAAAAAAAAAAACyDHr7vfzVAAj8eAP2XEEoRuuq/6/6m/s77xUrhQe5ApgAD/8tfy1/SmMdGV7SGusACAAIAPkCRS/+F9b/CAHb/5f/7g7y6xwvaN8E/jYeNRn4A48ZfSGSBe4dZxiQCgohYyk=",
+  "AU5SRl9HTE9WRV9DQzhDAAAMZCIBMgCZKBvPvAkAAAAAAAAAAAAAAACzDHj7tfzPACH8XQO4W0Eqlux9/6v6kvso7/sqkQfEAqoAEP8pfyl/12gnGRrTc+sACAAIACkD/i7JF9b/CgHa/5f/7g4p7Lwvtt7e/ZkeFRm1A6wZXCFABS0eHBg7CiMhSSk=",
+  "AU5SRl9HTE9WRV9DQzhDAAAxZCIBMgDkJ2TPxQkAAAAAAAAAAAAAAACxDIH7svy4ACD8WgPOWa8q7Owi/836pftw774qjgemArEA+P4rfyt/RmkwGZLTkesACAAIAEQD2S5tF9b/DgHY/5f/7g5L7OwvQN74/Y4e6xjkA5MZJSFJBUEe9hctCjAhESk=",
+  "AU5SRl9HTE9WRV9DQzhDAABWZCIBMgD/JtnOiQkAAAAAAAAAAAAAAACxDFX7h/ywACL8XgN6WqsmAuvj/hD7xftf8Nwq1AeDAqgAEf8Zfxl/S2yUGArUo+sACAAIACUD9i5gF9b/DwHX/5f/7g5Q7MIvMN5W/o0eHRlYBGkZHSGaBUgeMBh2CkohLyk=",
+  "AU5SRl9HTE9WRV9DQzhDAAB8ZCIBMgDnJDLOTAkAAAAAAAAAAAAAAACyDFf7f/x5AAj8VgNlWjklQ+p7/on7DPxm8W8qxgdTAsAADf8VfxV/pmwpGCLWj+wACAAIABAD4S5fF9b/DwHX/5f/7g617NYvuN2w/jIeLxnzBOwYByHcBREeUhitCikhSyk=",
+  "AU5SRl9HTE9WRV9DQzhDAAChZCIBMgAZIkHP+wgAAAAAAAAAAAAAAACxDGH7h/xFABf8UQM1VtMgpuhW/uX7L/yN8hUoEAcsAtEAJv8WfxZ/xmwMGNzYvu0ACAAIAAYDyC4/F9b/EAHX/5f/7g4w7esvDt3m/pEdFBlgBUIYuiAQBpkdPBjYCsggMik=",
+  "AU5SRl9HTE9WRV9DQzhDAADGZCIBMgBNH/7PCwkAAAAAAAAAAAAAAACyDG37o/wAAAP8ZAMCVMAfTegq/kj8Yvz/8i8nmAbZAekAR/8nfyd/tW5uGFnb1u4ACAAIAPsCni5IF9b/EAHX/5f/7g7V7TQwP9wU/yodARnEBbkXkiA9BjYdXBjeCmwgRSk=",
+  "AU5SRl9HTE9WRV9DQzhDAADrZCIBMgB9HKbQBQkAAAAAAAAAAAAAAACyDPz7Gv26//r7UQO5UJgeN+jI/Zn8gvxI9HwmCgaPAUMBev8WfxZ/63AjGCTg2/AACAAIAPkCPi5wF9b/DgHY/5f/7g7c7i4xzdpu/7EcKRkrBjMXfiBNBrgcjhjcCuMfgSk=",
+  "AU5SRl9HTE9WRV9DQzhDAAARZSIBMgDBGaLRFwkAAAAAAAAAAAAAAAC0DBj9s/14/+/7RwOfTPgdeuh2/df8ufxx9ZYllAU4AaYBrf8hfyF/aHNvF1HjVfIACAAIABED+S1HF9b/EAHX/5f/7g7J7/UxUdmd/1ocFxlkBsMWQiA+BhscVRjSCj0fVyk=",
+  "AU5SRl9HTE9WRV9DQzhDAAA1ZSIBMgBUGBzTPAkAAAAAAAAAAAAAAACxDCP9t/1m/+v7VQPYSgAe3uhk/f78xvwa9rElYQUWAd4Bs/8efx5/snPKFkXk3/IACAAIAA0D9C0vF9b/EQHW/5f/7g4m8Aky39iU/wscxhh8BmsW+x89BqsbKBjrCvAeOyk=",
+  "AU5SRl9HTE9WRV9DQzhDAABaZSIBMgDWFv7TPgkAAAAAAAAAAAAAAACyDG397/0////7VQO7SNQfzOlN/R39yvyV9iomUQUcASQCwP8lfyV/wnORFtrkNfMACAAIAAcD7y0bF9b/EgHW/5f/7g5H8KAx2ti//5YbpBi1Bh0WyB82BkYbCxj2Cr0eKSk=",
+  "AU5SRl9HTE9WRV9DQzhDAACAZSIBMgBUFvXULgkAAAAAAAAAAAAAAACzDM39E/43/+z7TwNhR6UhZ+oX/S39z/wc92cnWQUcAWgC5f8ffx9/oXLaFsbkNfMACAAIAAoD/y0GF9b/EwHV/5f/7g5N8MMxf9jq/0MbsBjOBuUVlh8QBgAbyBfpCqAe/ig=",
+  "AU5SRl9HTE9WRV9DQzhDAACnZSIBMgBeFaTVTQkAAAAAAAAAAAAAAACkDLX+d/4Y/977ZQO8ReAkY+sW/T39tvxv9q0nkAUYAYcC0P8efx5/KmyOGH7kxvIACAAIABMDCi7mFtb/FAHU/5f/7g5L8MIxLdjg/+gaZBjmBp4VUR8CBtIakheqCpgexSg=",
+  "AU5SRl9HTE9WRV9DQzhDAADMZSIBMgCzFBTWgAkAAAAAAAAAAAAAAABjDC0ABv8Q/+v7ewM0QlomOOzt/EL9yvzg9VsnjQX7AJECxf8gfyB/xGhVGkPlyvIACAAIAA8DIy7pFtb/FAHU/5f/7g5D8Lwx/Nf9/zcaPxghBykVGx/7BVsabBd3Ckwenyg=",
+  "AU5SRl9HTE9WRV9DQzhDAADxZSIBMgCCEwzWoAkAAAAAAAAAAAAAAABWC3EAMP/E/vf7cgMmOx8kCe2v/H391vzU9b0lKgW7ALgC7f8kfyR/FGjZGmHnafMACAAIAAUDGi4VF9b/EgHV/5f/7g4n8N4xudc4AN8Y7RewB08U5h4tBnkZjBdwCq0doSg=",
+  "AU5SRl9HTE9WRV9DQzhDAAAWZiIBMgDsDcXXIgoAAAAAAAAAAAAAAADoB0r/R/8V/jD8rAOeKrkYEe8t/Dv+GP3A9zohMwPe/8MCGQAnfyd/Yl6kFgLzqPYACAAIAAwDiC1oF9b/DgHY/5f/7g408IMxY9UzAbcUXxeKCWMRMx4NB+MWJRhOC08avig=",
+  "AU5SRl9HTE9WRV9DQzhDAAA8ZiIBMgDhBibe+QgAAAAAAAAAAAAAAAB9BT//gv8c/X784QOeHPELCPLv+t/+hv2Y/3MXYf+Q/tECoQArfyt/7PO5DzP8NfkACAAIAD0DUiyRF9b/DQHZ/5f/7g5U8ZcvX9GhAhwPYxaJDJoM7RxoCLkReRgjDTIUOyg=",
+  "AU5SRl9HTE9WRV9DQzhDAABgZiIBMgAqAaLl1gcAAAAAAAAAAAAAAADrAgv/z/9S/LD8GAQ2Dl0ESveW+sH/9f3MAf4Ltv2b/bcCTwEif+sqk+V4Cu8Bm/oACAAIAHEDxyq9F9b/CgHa/5f/7g5L8uUoJNDCA2wHDhWSDvoElBkICo8J7xdGDo8M/yU=",
+  "AU5SRl9HTE9WRV9DQzhDAACFZiIBMgA9/xfrWgYAAAAAAAAAAAAAAABcAVr/CgDm+9L8bwQSBv0Dd/qP+iMAYf42AH8F5f0P/VoCpAEmWIsf+u1IB7EEJfsACAAIAGADsyndF9b/CQHb/5f/7g608+cff9OQAlYAQBTlDjz6nxP6C3EA7xVlDtoD4yE=",
+  "AU5SRl9HTE9WRV9DQzhDAACqZiIBMgCR/wrtQgYAAAAAAAAAAAAAAACuAKH/IADb+xD9jgSpAmcD4vt9+mkAp/6r/xwDZP4Z/RkCugF5OW0qOvRLAy4FvvsACAAIAFUD4CjXF9b/CQHa/5f/7g739AceTtMeAW/6VxOxDS7yjQ+JDBz5dRMnDv364h0=",
+  "AU5SRl9HTE9WRV9DQzhDAADPZiIBMgAFAPLrSwYAAAAAAAAAAAAAAACDAK//IQCz+3r9pQR4AR0DhPxw+q0AAv9r/wcCoP5K/RQC5AEuIdslePdBAWEFHfwACAAIAGEDGygeGNb/BgHc/5f/7g589Q8b6dPy/qH0XROQCwLr4gzRC2zyWxH4C5rzxBs="
+ ]
+}
