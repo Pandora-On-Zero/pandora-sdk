@@ -71,8 +71,8 @@ def update_firmware(target: str, image: str, *, port: Optional[str] = None,
         if is_port_locked(failed):
             raise ConnectionFailed(
                 f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                "close it, then update the firmware.") from None
-        raise ConnectionFailed(f"could not open {port}: {failed}") from None
+                "close it, then update the firmware.", "in_use") from failed
+        raise ConnectionFailed(f"could not open {port}: {failed}", "open_failed") from failed
     updater.link = link
     try:
         if kind == GLOVE:

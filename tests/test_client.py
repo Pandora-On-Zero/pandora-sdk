@@ -53,6 +53,33 @@ def test_with_no_app_listening_the_error_says_how_to_switch_the_protocol_on(free
         pandora_sdk.connect(port=free_port, timeout=1.0)
 
 
+def test_with_no_app_listening_the_error_has_its_code_and_the_os_error_as_its_cause(free_port):
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.connect(port=free_port, timeout=1.0)
+
+    assert failed.value.code == "app_not_running"
+    assert failed.value.__cause__ is not None
+
+
+class Silent(StandIn):
+    """A websocket server that never says hello: not the app."""
+
+    def _serve(self, connection: Any) -> None:
+        for _ in connection:
+            pass
+
+
+def test_a_server_that_sends_no_hello_has_its_code():
+    silent = Silent()
+    try:
+        with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+            pandora_sdk.connect(port=silent.port, timeout=0.3)
+    finally:
+        silent.close()
+
+    assert failed.value.code == "not_the_app"
+
+
 def test_devices_asks_the_app_for_its_gloves(gloves):
     assert gloves.devices() == [
         Device("NRF_GLOVE_E5D1", "right", "Lab right", True),
@@ -183,6 +210,24 @@ def test_closing_the_client_ends_iteration_without_an_error(gloves):
     threading.Timer(0.1, gloves.close).start()
 
     assert list(gloves.frames()) == []
+
+
+def test_an_app_that_hangs_up_has_its_code(app, gloves):
+    app.drop()
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "app_closed"
+
+
+def test_reading_a_closed_client_has_its_code(gloves):
+    gloves.close()
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "closed"
 
 
 # ── wall time ────────────────────────────────────────────────────────────────
@@ -430,3 +475,17 @@ def test_a_callback_that_raises_ends_the_connection_with_its_error(app, gloves):
 
     with pytest.raises(pandora_sdk.Disconnected, match="callback for raw raised.*no such key"):
         gloves.read(timeout=2.0)
+
+
+def test_a_callback_that_raised_has_its_code_and_its_error_as_the_cause(app, gloves):
+    def _broken(reading):
+        raise ValueError("no such key")
+
+    gloves.on("raw", _broken)
+    app.send(raw())
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "callback_failed"
+    assert isinstance(lost.value.__cause__, ValueError)

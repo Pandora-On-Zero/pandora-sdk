@@ -362,6 +362,42 @@ one glove leaves the others raw only.
 | `pandora_sdk.Disconnected` | The app went away, or the receiver was unplugged, while you were reading |
 | `TimeoutError` | A `read(timeout=...)` or a request ran out of time |
 
+`ConnectionFailed` and `Disconnected` carry a `.code` that says which case it
+was, for a program to act on without reading the words, and the error from
+the OS (or the socket library, or your callback) that caused it as
+`__cause__`. The codes are stable; the words may change.
+
+```python
+try:
+    gloves = pandora_sdk.open_receiver()
+except pandora_sdk.ConnectionFailed as failed:
+    if failed.code == "in_use":
+        print("close the 01 Glove app first")
+    raise
+```
+
+| `ConnectionFailed.code` | When |
+| --- | --- |
+| `no_receiver` | No receiver is plugged in |
+| `several_receivers` | More than one is plugged in and no port was named |
+| `in_use` | Another program holds the receiver's port; the app, when it runs |
+| `open_failed` | The port would not open for another reason |
+| `app_not_running` | Nothing answered at the app's address: it is not running, or Protocol is off |
+| `not_the_app` | Something answered there but sent no hello |
+
+| `Disconnected.code` | When |
+| --- | --- |
+| `closed` | You called `close()` |
+| `unplugged` | The receiver was unplugged |
+| `read_failed` | Reading the receiver's port failed for another reason |
+| `pipeline_failed` | Without the app: a glove's pipeline raised |
+| `app_closed` | The app closed the connection (it quit, or Protocol was switched off) |
+| `connection_lost` | The connection to the app broke |
+| `callback_failed` | Your callback raised (see [A callback per message](#a-callback-per-message)) |
+
+`pandora_sdk.CONNECTION_FAILED_CODES` and `pandora_sdk.DISCONNECTED_CODES` hold
+the same lists.
+
 If your loop reads more slowly than frames arrive, the oldest unread ones are
 discarded (256 are kept per stream; `connect(buffer=...)` changes that) and
 `gloves.dropped` counts them. `latest()` is never behind.

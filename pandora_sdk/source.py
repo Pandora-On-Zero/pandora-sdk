@@ -35,12 +35,48 @@ class PandoraError(Exception):
 
 
 class ConnectionFailed(PandoraError):
-    """Nothing answered at the address, or there is no receiver to open."""
+    """Nothing answered at the address, or there is no receiver to open.
+    *code* says which, for a program to act on (CONNECTION_FAILED_CODES);
+    the error from the OS or the socket library, when there was one, is the
+    exception's __cause__."""
+
+    def __init__(self, message: str, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class Disconnected(PandoraError):
     """The connection ended: the app quit, the receiver was unplugged, or
-    this source was closed."""
+    this source was closed. *code* says which (DISCONNECTED_CODES); the
+    error that ended it, when there was one (the port's OSError, what a
+    callback raised), is the exception's __cause__."""
+
+    def __init__(self, message: str, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# ConnectionFailed.code: why nothing could be opened.
+CONNECTION_FAILED_CODES = {
+    "no_receiver": "no receiver is plugged into this computer",
+    "several_receivers": "more than one receiver is plugged in, and no port was named",
+    "in_use": "another program holds the receiver's port (the app, when it runs)",
+    "open_failed": "the receiver's port would not open for another reason",
+    "app_not_running": "nothing answered at the app's address: it is not running, or its "
+                       "Protocol adapter is off",
+    "not_the_app": "something answered at the address but sent no hello",
+}
+
+# Disconnected.code: why a source ended.
+DISCONNECTED_CODES = {
+    "closed": "close() was called",
+    "unplugged": "the receiver was unplugged",
+    "read_failed": "reading the receiver's port failed for another reason",
+    "pipeline_failed": "a glove's pipeline raised (without the app)",
+    "app_closed": "the app closed the connection (it quit, or turned Protocol off)",
+    "connection_lost": "the connection to the app broke",
+    "callback_failed": "a callback given to on() raised",
+}
 
 
 class CallbackFailed(PandoraError):
@@ -65,8 +101,11 @@ class Source:
             stream: deque(maxlen=buffer) for stream in protocol.STREAMS}
         self._latest: Dict[str, Dict[str, Any]] = {stream: {} for stream in protocol.STREAMS}
         self._closed = False
-        # Why the source ended, when it was not close().
+        # Why the source ended, when it was not close(): in words, its
+        # Disconnected code, and the error that ended it.
         self._lost = ""
+        self._lost_code = ""
+        self._lost_cause: Optional[BaseException] = None
         self._ended = False
         # Messages discarded unread because their queue was full.
         self.dropped = 0
@@ -95,16 +134,22 @@ class Source:
                 _log.exception("the callback for %s raised", stream)
                 raise CallbackFailed(f"the callback for {stream} raised {failed!r}") from failed
 
-    def _end(self, why: str) -> None:
-        """The feeding thread is done; *why* unless close() was called."""
+    def _end(self, why: str, code: str, cause: Optional[BaseException] = None) -> None:
+        """The feeding thread is done; *why* (with its Disconnected *code*
+        and the error that ended it) unless close() was called."""
         with self._changed:
             if not self._closed:
-                self._lost = why
+                self._lost, self._lost_code, self._lost_cause = why, code, cause
             self._ended = True
             self._changed.notify_all()
 
-    def _why_ended(self) -> str:
-        return self._lost or "this source was closed"
+    def _disconnected(self) -> Disconnected:
+        """The Disconnected that says why this source ended."""
+        if not self._lost:
+            return Disconnected("this source was closed", "closed")
+        error = Disconnected(self._lost, self._lost_code)
+        error.__cause__ = self._lost_cause
+        return error
 
     # ── for the reader ───────────────────────────────────────────────────
 
@@ -133,7 +178,7 @@ class Source:
         Disconnected when the source has ended."""
         message = self._next(stream, timeout)
         if message is None:
-            raise Disconnected(self._why_ended())
+            raise self._disconnected()
         return message
 
     def frames(self) -> Iterator[Frame]:
@@ -178,7 +223,7 @@ class Source:
             if unread:
                 return unread.popleft()
             if self._lost:
-                raise Disconnected(self._lost)
+                raise self._disconnected()
             return None
 
     # ── what each kind of source answers itself ──────────────────────────

@@ -76,7 +76,8 @@ class Client(Source):
         except (OSError, TimeoutError, WebSocketException) as failed:
             raise ConnectionFailed(
                 f"nothing answered at {url} ({failed}). Is the 01 Glove app running with "
-                "Protocol switched on (Settings > General > Advanced > Protocol)?") from None
+                "Protocol switched on (Settings > General > Advanced > Protocol)?",
+                "app_not_running") from failed
         self.server = self._exchange_hellos(url, name)
 
         # Answers to requests, oldest first (REPLIES).
@@ -109,7 +110,7 @@ class Client(Source):
             self._socket.close()
             raise ConnectionFailed(
                 f"{url} answered but sent no hello ({failed or 'timed out'}); "
-                "is that port the 01 Glove app's?") from None
+                "is that port the 01 Glove app's?", "not_the_app") from failed
         return Server(str(hello.get("server", "")), str(hello.get("version", "")),
                       hello["protocol"], tuple(hello.get("capabilities", ())))
 
@@ -186,8 +187,12 @@ class Client(Source):
                 self._replies.clear()
             try:
                 self._socket.send(protocol.dumps(message))
-            except ConnectionClosed:
-                raise Disconnected(self._why_ended()) from None
+            except ConnectionClosed as closed:
+                with self._changed:
+                    if self._closed or self._ended:
+                        raise self._disconnected() from None
+                raise Disconnected(f"the connection to the app was lost ({closed})",
+                                   "connection_lost") from closed
             deadline = time.monotonic() + timeout
             with self._changed:
                 while True:
@@ -200,7 +205,7 @@ class Client(Source):
                                 reply.get(key) == value for key, value in match.items()):
                             return reply
                     if self._closed or self._ended:
-                        raise Disconnected(self._why_ended())
+                        raise self._disconnected()
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError(
@@ -212,7 +217,7 @@ class Client(Source):
     def _read_socket(self) -> None:
         """The reader thread: sort what arrives until the connection ends, or
         a callback (on()) raises."""
-        why = "the app closed the connection"
+        why, code, cause = "the app closed the connection", "app_closed", None
         try:
             for message in self._socket:
                 if isinstance(message, str):
@@ -220,10 +225,11 @@ class Client(Source):
                 else:
                     self._on_binary(bytes(message))
         except ConnectionClosed as closed:
-            why = f"the connection to the app was lost ({closed})"
+            why, code, cause = (f"the connection to the app was lost ({closed})",
+                                "connection_lost", closed)
         except CallbackFailed as failed:
-            why = str(failed)
-        self._end(why)
+            why, code, cause = str(failed), "callback_failed", failed.__cause__
+        self._end(why, code, cause)
 
     def _on_text(self, text: str) -> None:
         try:

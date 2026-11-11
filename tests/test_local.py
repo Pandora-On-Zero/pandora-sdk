@@ -232,6 +232,103 @@ def test_a_receiver_the_app_holds_is_reported_as_in_use(monkeypatch):
         pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
 
 
+# ── error codes ──────────────────────────────────────────────────────────────
+
+def test_no_receiver_has_its_code(monkeypatch):
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, defaults={})
+
+    assert failed.value.code == "no_receiver"
+
+
+def test_two_receivers_have_their_code(monkeypatch):
+    monkeypatch.setattr(receiver, "find_receivers", lambda: [
+        receiver.ReceiverPort("COM7", "A", "01 Receiver"),
+        receiver.ReceiverPort("COM9", "B", "01 Receiver")])
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, defaults={})
+
+    assert failed.value.code == "several_receivers"
+
+
+def test_a_receiver_in_use_has_its_code_and_the_os_error_as_its_cause(monkeypatch):
+    refusal = OSError("could not open port 'COM7': PermissionError(13, 'Access is denied.')")
+
+    def _held(port, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(receiver, "open_port", _held)
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
+
+    assert failed.value.code == "in_use"
+    assert failed.value.__cause__ is refusal
+
+
+def test_a_port_that_will_not_open_for_another_reason_has_its_code(monkeypatch):
+    refusal = OSError("could not open port 'COM7': FileNotFoundError(2, 'not found')")
+
+    def _missing(port, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(receiver, "open_port", _missing)
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
+
+    assert failed.value.code == "open_failed"
+    assert failed.value.__cause__ is refusal
+
+
+def test_an_unplugged_receiver_has_its_code_and_the_os_error_as_its_cause(link, gloves):
+    link.unplugged = True
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "unplugged"
+    assert isinstance(lost.value.__cause__, OSError)
+
+
+def test_a_read_that_fails_otherwise_has_its_code(link, gloves, monkeypatch):
+    def _broken(_count):
+        raise OSError("the port said no")
+
+    monkeypatch.setattr(link, "read", _broken)
+
+    with pytest.raises(pandora_sdk.Disconnected, match="the port said no") as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "read_failed"
+
+
+def test_reading_a_closed_source_has_its_code(link, clock):
+    opened = pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock)
+    opened.close()
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        opened.read(timeout=2.0)
+
+    assert lost.value.code == "closed"
+
+
+def test_a_callback_that_raised_has_its_code_and_its_error_as_the_cause(link, gloves):
+    def _broken(reading):
+        raise ValueError("no such key")
+
+    gloves.on("raw", _broken)
+    gloves.subscribe("raw")
+    link.feed(packet_line(RIGHT))
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "callback_failed"
+    assert isinstance(lost.value.__cause__, ValueError)
+
+
 def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypatch):
     """A pandora-core from before it carried them; hands made without them
     would be wrong, silently."""

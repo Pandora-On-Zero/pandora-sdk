@@ -102,11 +102,11 @@ def receiver_port(port: Optional[str] = None) -> str:
         return port
     found = receiver.find_receivers()
     if not found:
-        raise ConnectionFailed("no receiver is plugged into this computer")
+        raise ConnectionFailed("no receiver is plugged into this computer", "no_receiver")
     if len(found) > 1:
         raise ConnectionFailed(
             f"more than one receiver ({', '.join(f.device for f in found)}); "
-            "say which one by its port")
+            "say which one by its port", "several_receivers")
     return found[0].device
 
 
@@ -120,8 +120,8 @@ def open_link(port: Optional[str] = None) -> Any:
         if receiver.is_port_locked(failed):
             raise ConnectionFailed(
                 f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                "read through it with pandora_sdk.connect(), or close it.") from None
-        raise ConnectionFailed(f"could not open {port}: {failed}") from None
+                "read through it with pandora_sdk.connect(), or close it.", "in_use") from failed
+        raise ConnectionFailed(f"could not open {port}: {failed}", "open_failed") from failed
     receiver.prepare_link(port, link, _log.info)
     return link
 
@@ -160,6 +160,11 @@ def link_failure(failed: OSError) -> str:
     """Why reading the receiver ended, for the person at the keyboard."""
     return ("the receiver was unplugged" if receiver.is_disconnect_error(failed)
             else f"reading the receiver failed ({failed})")
+
+
+def link_failure_code(failed: OSError) -> str:
+    """Why reading the receiver ended, as Disconnected's code."""
+    return "unplugged" if receiver.is_disconnect_error(failed) else "read_failed"
 
 
 def open_receiver(profiles: Optional[Profiles] = None, *, port: Optional[str] = None,
@@ -340,7 +345,7 @@ class Local(Source):
 
     def _read_link(self) -> None:
         """The reader thread: packets to frames until the port ends."""
-        why = ""
+        why, code, cause = "", "closed", None
         try:
             for packet in link_packets(self._link, self._decoder):
                 if not self._running:
@@ -349,12 +354,12 @@ class Local(Source):
                     with self._pipeline:
                         self._on_packet(packet)
         except OSError as failed:
-            why = link_failure(failed)
+            why, code, cause = link_failure(failed), link_failure_code(failed), failed
         except CallbackFailed as failed:
-            why = str(failed)
+            why, code, cause = str(failed), "callback_failed", failed.__cause__
         except Exception as failed:  # the pipeline's own failure must not pass for silence
-            why = f"a glove's pipeline failed ({failed!r})"
-        self._end(why)
+            why, code, cause = f"a glove's pipeline failed ({failed!r})", "pipeline_failed", failed
+        self._end(why, code, cause)
 
     def _on_packet(self, packet: GlovePacket) -> None:
         device = packet.device_id

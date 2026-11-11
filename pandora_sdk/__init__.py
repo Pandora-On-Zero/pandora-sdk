@@ -21,10 +21,11 @@ from pandora_core.protocol import (DEFAULT_PORT, Calibration, Debug, Device, Fra
 from pandora_sdk.client import Client, Server, connect
 from pandora_sdk.local import (Local, default_profiles_dir, load_profiles, open_receiver,
                                save_profile)
-from pandora_sdk.source import (ConnectionFailed, Disconnected, PandoraError, ServerError,
-                                Source)
+from pandora_sdk.source import (CONNECTION_FAILED_CODES, DISCONNECTED_CODES, ConnectionFailed,
+                                Disconnected, PandoraError, ServerError, Source)
 
-__all__ = ["DEFAULT_PORT", "Calibration", "Client", "ConnectionFailed", "Debug", "Device",
-           "Disconnected", "Frame", "Local", "PandoraError", "Profile", "ProtocolError", "Raw",
-           "Server", "ServerError", "Source", "Subscription", "connect", "default_profiles_dir",
-           "load_profiles", "open_receiver", "save_profile"]
+__all__ = ["CONNECTION_FAILED_CODES", "DEFAULT_PORT", "DISCONNECTED_CODES", "Calibration",
+           "Client", "ConnectionFailed", "Debug", "Device", "Disconnected", "Frame", "Local",
+           "PandoraError", "Profile", "ProtocolError", "Raw", "Server", "ServerError", "Source",
+           "Subscription", "connect", "default_profiles_dir", "load_profiles", "open_receiver",
+           "save_profile"]
