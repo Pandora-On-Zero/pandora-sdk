@@ -31,6 +31,8 @@ def no_real_receiver(monkeypatch) -> None:
 
     monkeypatch.setattr(receiver, "find_receivers", lambda: [])
     monkeypatch.setattr(receiver, "open_port", _refused)
+    # It asks the OS about the named port's driver; a made-up one has none.
+    monkeypatch.setattr(receiver, "prepare_link", lambda *_args, **_kwargs: None)
 
 
 @pytest.fixture

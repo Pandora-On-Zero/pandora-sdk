@@ -84,18 +84,24 @@ def save_profile(folder: Union[str, Path], device_id: str, profile: Profile) -> 
     return path
 
 
+def receiver_port(port: Optional[str] = None) -> str:
+    """*port*, or the serial port of the one receiver plugged in."""
+    if port is not None:
+        return port
+    found = receiver.find_receivers()
+    if not found:
+        raise ConnectionFailed("no receiver is plugged into this computer")
+    if len(found) > 1:
+        raise ConnectionFailed(
+            f"more than one receiver ({', '.join(f.device for f in found)}); "
+            "say which one by its port")
+    return found[0].device
+
+
 def open_link(port: Optional[str] = None) -> Any:
     """The receiver's serial port, opened as the link needs: *port*, or the
     one receiver plugged in."""
-    if port is None:
-        found = receiver.find_receivers()
-        if not found:
-            raise ConnectionFailed("no receiver is plugged into this computer")
-        if len(found) > 1:
-            raise ConnectionFailed(
-                f"more than one receiver ({', '.join(f.device for f in found)}); "
-                "say which one by its port")
-        port = found[0].device
+    port = receiver_port(port)
     try:
         link = receiver.open_port(port, timeout=0.2)
     except OSError as failed:
