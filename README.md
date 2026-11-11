@@ -344,6 +344,28 @@ What is different without the app:
 | Raw `hall` with gap fill on | A sensor that read all zeros carries the reading gap fill gave it | The glove's own zeros. Its cancelled counts are the filled reading, cancelled, as through the app |
 
 
+#### Opening the receiver yourself
+
+`open_receiver()` finds and opens the receiver itself. A program that wants to
+choose among several receivers, set its own timeouts, or keep the port open
+across sources opens it and hands it over:
+
+```python
+for found in pandora_sdk.list_receivers():       # by port, COM9 before COM10
+    print(found.device, found.serial_number, found.product)
+
+port = pandora_sdk.open_link("COM7", timeout=0.05, write_timeout=1.0)
+gloves = pandora_sdk.Local(link=port)             # closing gloves closes the port
+```
+
+| Call | Gives |
+| --- | --- |
+| `list_receivers()` | The receivers plugged in, as `ReceiverPort` (`device`, the port to open; `serial_number`, the receiver's stable identity, `""` when it reports none; `product`), sorted by port name in number order |
+| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use` or `open_failed` when the port will not open |
+
+`Local(link=...)` reads any object with the port's `read`, `in_waiting`,
+`write` and `close`, which is also how to feed it a recording or a simulator.
+
 One thread runs every glove's pipeline. On the PC this was written on, a
 packet takes about a millisecond with both streams and the skeleton on, and a
 glove sends 200 a second.

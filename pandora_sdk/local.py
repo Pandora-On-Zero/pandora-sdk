@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import replace
@@ -52,6 +53,7 @@ from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, H
                                         HALL_TARGET_ALL)
 from pandora_core.protocol import (Calibration, Device, HallRange, Haptics, Pacer, ProtocolError,
                                    Subscription)
+from pandora_core.receiver import ReceiverPort
 from pandora_core.scope import shipped_defaults
 from pandora_core.serial_framing import encode_frame
 from pandora_core.tuning import Tuning
@@ -96,11 +98,22 @@ def save_profile(folder: Union[str, Path], device_id: str, profile: Profile) -> 
     return path
 
 
+def list_receivers() -> List[ReceiverPort]:
+    """The receivers plugged into this computer, by port name in number
+    order (COM9 before COM10): each one's port (.device), USB serial number
+    and product name."""
+    return sorted(receiver.find_receivers(), key=lambda found: _port_order(found.device))
+
+
+def _port_order(name: str) -> List[Union[int, str]]:
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)]
+
+
 def receiver_port(port: Optional[str] = None) -> str:
     """*port*, or the serial port of the one receiver plugged in."""
     if port is not None:
         return port
-    found = receiver.find_receivers()
+    found = list_receivers()
     if not found:
         raise ConnectionFailed("no receiver is plugged into this computer", "no_receiver")
     if len(found) > 1:
@@ -110,12 +123,19 @@ def receiver_port(port: Optional[str] = None) -> str:
     return found[0].device
 
 
-def open_link(port: Optional[str] = None) -> Any:
-    """The receiver's serial port, opened as the link needs: *port*, or the
-    one receiver plugged in."""
+def open_link(port: Optional[str] = None, *, timeout: float = 0.2,
+              write_timeout: float = 2.0) -> Any:
+    """The receiver's serial port (a pyserial Serial), opened as the link
+    needs: 4 Mbaud, RTS/CTS flow control, held by this program alone, and on
+    Linux the CH343's flow control switched on. *port*, or the one receiver
+    plugged in (list_receivers() for choosing among several). *timeout* is
+    how long a read waits for its first byte, in seconds; *write_timeout*
+    how long a write may wait on the receiver (a hung one stops taking
+    bytes), after which it raises. ConnectionFailed when it cannot be
+    opened; its code says why."""
     port = receiver_port(port)
     try:
-        link = receiver.open_port(port, timeout=0.2)
+        link = receiver.open_port(port, timeout=timeout, write_timeout=write_timeout)
     except OSError as failed:
         if receiver.is_port_locked(failed):
             raise ConnectionFailed(

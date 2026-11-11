@@ -329,6 +329,46 @@ def test_a_callback_that_raised_has_its_code_and_its_error_as_the_cause(link, gl
     assert isinstance(lost.value.__cause__, ValueError)
 
 
+# ── opening the port, and the receivers plugged in ───────────────────────────
+
+@pytest.fixture
+def opened_with(monkeypatch):
+    """The arguments each receiver.open_port call was given, the port
+    returned being a made-up one."""
+    calls = []
+
+    def _open(port, **kwargs):
+        calls.append((port, kwargs))
+        return Link()
+
+    monkeypatch.setattr(receiver, "open_port", _open)
+    return calls
+
+
+def test_open_link_opens_the_port_with_the_timeouts_asked_for(opened_with):
+    pandora_sdk.open_link("COM7", timeout=0.05, write_timeout=1.0)
+
+    assert opened_with == [("COM7", {"timeout": 0.05, "write_timeout": 1.0})]
+
+
+def test_open_link_by_default_waits_a_fifth_of_a_second_to_read_and_two_to_write(opened_with):
+    pandora_sdk.open_link("COM7")
+
+    assert opened_with == [("COM7", {"timeout": 0.2, "write_timeout": 2.0})]
+
+
+def test_list_receivers_gives_the_receivers_plugged_in_in_port_order(monkeypatch):
+    found = [receiver.ReceiverPort("COM10", "B", "01 Receiver"),
+             receiver.ReceiverPort("COM9", "A", "01 Receiver")]
+    monkeypatch.setattr(receiver, "find_receivers", lambda: found)
+
+    assert pandora_sdk.list_receivers() == [found[1], found[0]]
+
+
+def test_list_receivers_with_none_plugged_in_is_empty():
+    assert pandora_sdk.list_receivers() == []
+
+
 # ── knowing it ended without reading ─────────────────────────────────────────
 
 def test_a_running_source_has_not_ended(gloves):
