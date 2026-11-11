@@ -16,7 +16,7 @@ with pandora_sdk.connect() as gloves:
 
 **Status:** version 0.1, private. It reads hands, raw readings and the
 pipeline's debug values, through a running app or straight from the receiver
-with no app. It sends haptics and a Hall range to a glove, gives each glove's
+with no app. It sends haptics and Hall settings to a glove, gives each glove's
 calibration bounds, calibrates a glove with no app (`pandora calibrate`) and
 updates firmware (`pandora update-firmware`). None of the sending, the
 calibrating or the firmware update has been tried on a real glove yet: they
@@ -349,8 +349,11 @@ gloves.send_hall_config(glove, hall_range=1, target="Index/Prox")    # one senso
 `open_receiver()` reads the receiver itself and runs each glove's pipeline in
 your process. Everything after that line is the same as with `connect()`:
 `subscribe`, `frames`, `raw`, `debug`, `read`, `latest`, `on`, `devices`,
-`calibration`, `latest_calibration`, the commands for a glove, and the same
-frames.
+`calibration`, `latest_calibration`, the commands for a glove, `ended`,
+`wait_ended`, `end_error`, and the same frames. Only here: the
+[full Hall config](#the-full-hall-config-without-the-app) (`send_hall_config`),
+[the receiver's text lines and damaged frames](#the-receivers-own-lines-and-damaged-frames)
+(`on_line`, `bad_frames`), and gloves with no profile read raw only.
 
 ```python
 with pandora_sdk.open_receiver() as gloves:
@@ -362,7 +365,7 @@ with pandora_sdk.open_receiver() as gloves:
 Only one program can hold the receiver. If the app is running, it has it: use
 `connect()`, or close the app.
 
-A glove's hands need a **profile**: its hand and its calibration.
+A glove's frames need a **profile**: its hand and its calibration.
 [`pandora calibrate`](#calibrating-a-glove) writes one. A glove that sends but
 has no profile is **read raw only**, and `gloves.unprofiled` holds its id:
 
@@ -377,8 +380,8 @@ has no profile is **read raw only**, and `gloves.unprofiled` holds its id:
 - `default_hand=None` leaves such a glove out altogether, as before.
 
 So a program that only wants raw readings needs no calibration at all. One
-that wants each glove's right hand without calibrating gives a bare profile,
-which needs no file either: `open_receiver({"NRF_GLOVE_E5D1":
+that wants a glove's raw readings on its true hand, without calibrating,
+gives a bare profile, which needs no file either: `open_receiver({"NRF_GLOVE_E5D1":
 pandora_sdk.Profile("left")})`. Pass `{}` rather than nothing to read no
 profile folder at all.
 
@@ -696,7 +699,7 @@ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
 
 ## Not here yet
 
-- Any of it tried on a real glove: the haptics and Hall range commands,
+- Any of it tried on a real glove: the haptics and Hall commands,
   `pandora calibrate` and `pandora update-firmware` have met simulated gloves,
   recorded packets and made-up receivers only.
 - The glove's other settings (haptic drive, power-off time) and running a
