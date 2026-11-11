@@ -41,7 +41,9 @@ download of that repository fails with "Filename too long":
 git config --global core.longpaths true
 ```
 
-Python 3.11 or newer. It brings in `websockets`, `msgpack`, `numpy` and `pyserial`.
+Python 3.11 or newer. It brings in `websockets`, `msgpack`, `numpy` (1.26 or
+newer) and `pyserial`: `pandora-core` with its `pipeline` extra (numpy, for
+making hands) and its `serial` extra (pyserial, for the receiver).
 
 To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
 
@@ -56,9 +58,13 @@ why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
 The same goes for `pandora-sdk` in a program that pins it to a commit, which
 is why its version goes up with every change a program may depend on.
-This version needs `pandora-core` 0.4.0 (commit `56b63dd`), which added the
-battery voltage and two power flags to raw readings (0.3.0 had added
-[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)).
+This version needs `pandora-core` 0.7.0 (commit `43ffd5e`). Nothing this
+library offers changed with it: the core was sorted into layers, its base
+install is now only the wire layer (msgpack), and numpy, which it needs only
+to make hands, became its `pipeline` extra with a floor of 1.26 instead of 2.
+So `pandora-sdk` now installs next to a program that pins numpy 1.26. (0.4.0
+had added the battery voltage and two power flags to raw readings, 0.3.0
+[the counts after earth-field cancellation](#counts-after-earth-field-cancellation).)
 An install that has an older core moves to it with the `--force-reinstall`
 above.
 
@@ -703,12 +709,14 @@ commit you pin must carry a higher `pandora-core` version** (its
 `pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
 installed core whose version matches, whatever commit it came from, so a pin
 to a new commit with the same version leaves people on the old core. The pin
-is at 0.4.0 now (`56b63dd`). Then install again with
+is at 0.7.0 now (`43ffd5e`), with the core's `pipeline` and `serial` extras;
+its `ble` extra (bleak) stays out until this library uses Bluetooth. Then
+install again with
 `pip install --force-reinstall -e ".[dev]"`, or, to replace only the core:
 
 ```bash
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
-  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@56b63ddb0e1ba323c291aa39f18a812b82f02083#subdirectory=pandora-core"
+  pip install --force-reinstall --no-deps "pandora-core[pipeline,serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@43ffd5e8c68314cf84ad792ad878187f80248261#subdirectory=pandora-core"
 ```
 
 **This library's own `version`** (`pyproject.toml`) follows the same rule as
