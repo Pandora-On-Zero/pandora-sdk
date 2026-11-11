@@ -5,7 +5,8 @@ A Source is fed by one background thread (the socket's, or the receiver's).
 Per stream it keeps the newest message of each glove (latest()) and a short
 queue of unread ones (read(), frames(), raw(), debug()); when the queue is
 full the oldest is dropped and counted, so a slow reader gets fresh hands, not
-a growing backlog.
+a growing backlog. A stream given a callback (on()) skips the queue: each
+message is handed to the callback on that thread as it arrives.
 
 The commands for a glove (play_rom, play_rtp, stop, set_hall_range) and its
 calibration bounds have the same names and arguments in both modes; each mode
@@ -13,9 +14,10 @@ answers them its own way.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
-from typing import (Any, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union,
+from typing import (Any, Callable, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union,
                     overload)
 
 from pandora_core import protocol
@@ -23,6 +25,8 @@ from pandora_core.packet_layout import HAPTIC_MOTOR_COUNT
 from pandora_core.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
 
 Message = Union[Frame, Raw, Debug]
+
+_log = logging.getLogger("pandora_sdk")
 
 
 class PandoraError(Exception):
@@ -37,6 +41,11 @@ class ConnectionFailed(PandoraError):
 class Disconnected(PandoraError):
     """The connection ended: the app quit, the receiver was unplugged, or
     this source was closed."""
+
+
+class CallbackFailed(PandoraError):
+    """Inside this package: a callback given to Source.on() raised, which
+    ends the source."""
 
 
 class ServerError(PandoraError):
@@ -61,17 +70,30 @@ class Source:
         self._ended = False
         # Messages discarded unread because their queue was full.
         self.dropped = 0
+        # Per stream, the function given each message instead of the queue (on()).
+        self._callbacks: Dict[str, Callable[[Any], object]] = {}
 
     # ── for the thread that feeds it ─────────────────────────────────────
 
     def _deliver(self, stream: str, message: Message) -> None:
+        """Keep *message*, or hand it to the stream's callback. CallbackFailed
+        when that raised: the feeding thread ends the source with it."""
         with self._changed:
-            unread = self._unread[stream]
-            if len(unread) == unread.maxlen:
-                self.dropped += 1
-            unread.append(message)
+            callback = self._callbacks.get(stream)
+            if callback is None:
+                unread = self._unread[stream]
+                if len(unread) == unread.maxlen:
+                    self.dropped += 1
+                unread.append(message)
             self._latest[stream][message.device] = message
             self._changed.notify_all()
+        if callback is not None:
+            # Outside the lock, so the callback can ask this source anything.
+            try:
+                callback(message)
+            except Exception as failed:
+                _log.exception("the callback for %s raised", stream)
+                raise CallbackFailed(f"the callback for {stream} raised {failed!r}") from failed
 
     def _end(self, why: str) -> None:
         """The feeding thread is done; *why* unless close() was called."""
@@ -85,6 +107,25 @@ class Source:
         return self._lost or "this source was closed"
 
     # ── for the reader ───────────────────────────────────────────────────
+
+    def on(self, stream: str, callback: Optional[Callable[[Any], object]]) -> None:
+        """Call *callback* with each message of *stream* as it arrives,
+        instead of queueing it; None goes back to queueing. For a program
+        that must not wait on a queue.
+
+        The callback runs on the thread that reads the app's socket or the
+        receiver, so nothing else arrives until it returns: keep it short.
+        latest() still has its messages; read() and the iterators get none
+        of them. If it raises, the source ends: reading raises Disconnected
+        with its error, and the error is logged. Subscribing is still what
+        makes messages arrive."""
+        if stream not in self._unread:
+            raise ValueError(f"no stream {stream!r}; there is {list(self._unread)}")
+        with self._changed:
+            if callback is None:
+                self._callbacks.pop(stream, None)
+            else:
+                self._callbacks[stream] = callback
 
     def read(self, stream: str = "frames", timeout: Optional[float] = None) -> Any:
         """The oldest unread message of *stream* (a Frame, or a Raw for

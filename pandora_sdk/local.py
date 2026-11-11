@@ -48,11 +48,15 @@ from pandora_core.scope import shipped_defaults
 from pandora_core.serial_framing import encode_frame
 from pandora_core.tuning import Tuning
 
-from pandora_sdk.source import ConnectionFailed, PandoraError, ServerError, Source
+from pandora_sdk.source import CallbackFailed, ConnectionFailed, PandoraError, ServerError, Source
 
 # A glove with no packet for this long is listed as not connected, as the
 # protocol's device list says, and takes no commands.
 SILENT_AFTER_S = 2.0
+
+# The streams that need a hand made: a glove's pipeline runs only while one of
+# them is subscribed for it.
+HAND_STREAMS = ("frames", "debug")
 
 Profiles = Union[str, Path, Mapping[str, Union[Profile, Mapping[str, Any]]]]
 
@@ -202,9 +206,13 @@ class Local(Source):
         # be put on, which the glove's next packet does.
         self._ranges: Dict[str, int] = {}
         self._new_range: Dict[str, int] = {}
+        # Gloves whose pipeline has had every packet since it was built: the
+        # ones a frames or debug subscription has included since.
+        self._fed: Set[str] = set()
         # Held by the reader through each packet, so a glove's pipeline is
-        # never read half-changed (calibration()).
-        self._pipeline = threading.Lock()
+        # never read half-changed (calibration()). Re-entrant: a callback
+        # (on()) runs inside it and may ask for calibration().
+        self._pipeline = threading.RLock()
         # One command written to the port at a time.
         self._writing = threading.Lock()
         # Gloves heard that have no profile; their packets are left out.
@@ -331,6 +339,8 @@ class Local(Source):
                         self._on_packet(packet)
         except OSError as failed:
             why = link_failure(failed)
+        except CallbackFailed as failed:
+            why = str(failed)
         except Exception as failed:  # the pipeline's own failure must not pass for silence
             why = f"a glove's pipeline failed ({failed!r})"
         self._end(why)
@@ -342,18 +352,35 @@ class Local(Source):
             self.packets += 1
             glove = self._gloves.get(device)
             if glove is None:
-                profile = self._profiles.get(device)
-                if profile is None:
+                found = self._profiles.get(device)
+                if found is None:
                     self.unprofiled.add(device)
                     return
-                glove = self._gloves[device] = self._glove(profile)
+                profile = found
             elif device in self._new_range:
                 # A new Glove on the new range: building one is how the core
                 # puts a glove's calibration on the range its profile names.
                 retired = glove
                 profile = self._profiles[device] = replace(
                     glove.profile, range=self._new_range.pop(device), sensor_ranges={})
+            else:
+                profile = glove.profile
+            # A hand is made only for a glove that a frames or debug
+            # subscription includes. A pipeline that missed packets starts
+            # again as a new Glove, as on the glove's first packet: its
+            # filters would otherwise pick up from a packet long gone.
+            make_hand = any(wanted.wants(device, profile.hand)
+                        for stream, (wanted, _) in self._streams.items()
+                        if stream in HAND_STREAMS)
+            fresh = (glove is None or retired is not None
+                     or (make_hand and device not in self._fed))
+            if glove is None or fresh:
+                retired = retired or glove
                 glove = self._gloves[device] = self._glove(profile)
+            if make_hand:
+                self._fed.add(device)
+            else:
+                self._fed.discard(device)
             now = self._clock()
             back = now - self._seen_s.get(device, now) > SILENT_AFTER_S
             resend = self._ranges.get(device) if back else None
@@ -372,14 +399,25 @@ class Local(Source):
         wall_time_us = int(self._wall_clock() * 1_000_000)
         # The Frame, Raw and Debug a client of the app would get: through the
         # protocol's own encoding, so the two modes cannot differ.
+        raw = None
         if "raw" in due:
             # Before the pipeline, which changes the packet in place.
-            self._deliver("raw", protocol.decode_raw(protocol.encode_raw(
+            raw = protocol.decode_raw(protocol.encode_raw(
                 packet, glove.hand, seq, time_us, glove.hall_range, glove.sensor_ranges,
-                wall_time_us)))
-        # Every packet goes through the pipeline, wanted or not: its filters
-        # carry state from one to the next.
-        frame = glove.push_decoded(packet)
+                wall_time_us))
+        frame = None
+        if fresh:
+            # A new Glove's first packet loads its profile into its stores,
+            # which calibration() reads: before a callback can ask for it.
+            frame = glove.push_decoded(packet)
+        if raw is not None:
+            self._deliver("raw", raw)
+        if not make_hand:
+            return
+        # From here every packet goes through the pipeline, wanted now or
+        # not: its filters carry state from one to the next.
+        if frame is None:
+            frame = glove.push_decoded(packet)
         if "frames" in due:
             self._deliver("frames", protocol.decode_frame(protocol.encode_frame(
                 frame, seq, time_us, due["frames"].bones, wall_time_us)))
