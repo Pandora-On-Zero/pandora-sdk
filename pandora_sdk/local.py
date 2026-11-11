@@ -440,15 +440,17 @@ class Local(Source):
         time_us = int(now * 1_000_000)
         wall_time_us = int(self._wall_clock() * 1_000_000)
         # The Frame, Raw and Debug a client of the app would get: through the
-        # protocol's own encoding, so the two modes cannot differ.
+        # protocol's own code, so the two modes cannot differ. A Raw is built
+        # straight from the packet (raw_from_packet is decode_raw of
+        # encode_raw, without the msgpack round trip).
         raw = None
         cancelled = "raw" in due and due["raw"].cancelled
         if "raw" in due:
             # Before the pipeline, which changes the packet in place: hall is
             # what the glove sent.
-            raw = protocol.decode_raw(protocol.encode_raw(
+            raw = protocol.raw_from_packet(
                 packet, profile.hand, seq, time_us, profile.range, profile.sensor_ranges,
-                wall_time_us))
+                wall_time_us)
         if raw is not None and not cancelled:
             self._deliver("raw", raw)
         if not make_hand or glove is None:
@@ -459,11 +461,12 @@ class Local(Source):
         if raw is not None and cancelled:
             # The counts the pipeline normalised exist only now, after gap
             # fill and earth-field cancellation changed the packet: read by
-            # the core's encode_raw, as the app's server reads them. The
-            # rest of the message stays the one made before.
-            after = protocol.decode_raw(protocol.encode_raw(
+            # the core's raw_from_packet, as the app's server reads them
+            # (encode_raw, the same code). The rest of the message stays the
+            # one made before.
+            after = protocol.raw_from_packet(
                 packet, profile.hand, seq, time_us, profile.range, profile.sensor_ranges,
-                wall_time_us, cancelled=True))
+                wall_time_us, cancelled=True)
             self._deliver("raw", replace(
                 raw, hall_cancelled=after.hall_cancelled,
                 thumb_distal_cancelled=after.thumb_distal_cancelled,
