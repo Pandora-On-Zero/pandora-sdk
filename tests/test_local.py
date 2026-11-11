@@ -6,15 +6,30 @@ import json
 import threading
 
 import pytest
-from fakelink import Link, packet_line
+from fakelink import Link, packet_line, sent
 from standin import wait
 
 import pandora_sdk
 from pandora_core import receiver
+from pandora_core.packet_layout import (
+    GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_ROM, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_FILTER,
+    HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_RANGE_5MT, HALL_RANGE_50MT, HALL_TARGET_ALL,
+    USB_HALL_CONFIG_FORMAT, USB_HAPTIC_ROM_FORMAT, USB_HAPTIC_RTP_FORMAT,
+)
 from pandora_sdk import Device, Subscription
 
 RIGHT, LEFT, STRANGER = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D", "NRF_GLOVE_0000"
 PROFILES = {RIGHT: {"hand": "right", "name": "Lab right"}, LEFT: {"hand": "left"}}
+# The right glove with its index finger's curl calibrated at 5 mT, the range
+# it runs at; the left glove calibrated not at all.
+INDEX = {"prox_min": {"x": -800.0, "y": 140.0, "z": 2200.0},
+         "prox_max": {"x": 30.0, "y": -10.0, "z": 4000.0},
+         "meta_min": {"x": 400.0, "y": -90.0, "z": 1300.0},
+         "meta_max": {"x": 10.0, "y": 8.0, "z": 2900.0}}
+CALIBRATED = {RIGHT: {"hand": "right", "range": HALL_RANGE_5MT,
+                      "sections": {"CURL": {"mag_range": HALL_RANGE_5MT,
+                                            "calibrations": {"Index": INDEX}}}},
+              LEFT: {"hand": "left"}}
 
 
 class Clock:
@@ -217,3 +232,199 @@ def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypat
 
     with pytest.raises(pandora_sdk.PandoraError, match="default files"):
         pandora_sdk.Local(PROFILES, link=link)
+
+
+# ── wall time ────────────────────────────────────────────────────────────────
+
+def test_frames_and_raw_messages_carry_the_wall_time_they_were_made_at(link, clock):
+    with pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock,
+                           wall_clock=lambda: 1_762_000_000.25) as gloves:
+        gloves.subscribe(bones=False)
+        gloves.subscribe("raw")
+        link.feed(packet_line(RIGHT))
+
+        assert gloves.read(timeout=2.0).wall_time_us == 1_762_000_000_250_000
+        assert gloves.read("raw", timeout=2.0).wall_time_us == 1_762_000_000_250_000
+
+
+# ── commands for a glove ─────────────────────────────────────────────────────
+
+ID = RIGHT.encode().ljust(16, b"\0")
+
+
+@pytest.fixture
+def heard(link, gloves):
+    """*gloves* once the right glove has sent a packet."""
+    link.feed(packet_line(RIGHT))
+    assert wait(lambda: gloves.devices())
+    return gloves
+
+
+def test_play_rom_writes_the_rom_command_for_the_glove_to_the_receiver(link, heard):
+    heard.play_rom(RIGHT, [0, 0, 47, 0, 0, 0])
+
+    assert sent(link, GLOVE_PKT_HAPTIC_ROM, USB_HAPTIC_ROM_FORMAT) == [
+        (GLOVE_PKT_HAPTIC_ROM, ID, 0, 0, 47, 0, 0, 0)]
+
+
+def test_play_rtp_writes_an_amplitude_and_a_duration_per_motor(link, heard):
+    heard.play_rtp(RIGHT, [0, 90, 90, 0, 0, 0], [300] * 6)
+
+    assert sent(link, GLOVE_PKT_HAPTIC_RTP, USB_HAPTIC_RTP_FORMAT) == [
+        (GLOVE_PKT_HAPTIC_RTP, ID, 0, 90, 90, 0, 0, 0, 300, 300, 300, 300, 300, 300)]
+
+
+def test_stop_writes_the_all_zero_frame(link, heard):
+    heard.stop(RIGHT)
+
+    assert sent(link, GLOVE_PKT_HAPTIC_RTP, USB_HAPTIC_RTP_FORMAT) == [
+        (GLOVE_PKT_HAPTIC_RTP, ID, *([0] * 12))]
+
+
+def test_a_command_for_a_glove_not_heard_is_refused_as_the_app_refuses_it(link, heard):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.play_rom(LEFT, [1, 0, 0, 0, 0, 0])
+
+    assert refused.value.code == "unknown_device"
+    assert link.written == []
+
+
+def test_a_command_for_a_glove_that_went_silent_is_refused(link, heard, clock):
+    clock.now += 3.0
+
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.stop(RIGHT)
+
+    assert refused.value.code == "unknown_device"
+
+
+def test_haptics_the_protocol_does_not_allow_are_refused_and_not_sent(link, heard):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.play_rtp(RIGHT, [300, 0, 0, 0, 0, 0], [100] * 6)
+
+    assert refused.value.code == "bad_haptics"
+    assert link.written == []
+
+
+def test_a_command_the_receiver_will_not_take_raises_send_failed(link, heard):
+    link.refuses_writes = True
+
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.stop(RIGHT)
+
+    assert refused.value.code == "send_failed"
+
+
+def test_set_hall_range_puts_every_sensor_on_it_with_the_power_up_settings(link, heard):
+    assert heard.set_hall_range(RIGHT, HALL_RANGE_50MT) == ""
+
+    assert sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT) == [
+        (GLOVE_PKT_HALL_CONFIG, ID, 0, HALL_RANGE_50MT, HALL_DEFAULT_OSR, HALL_DEFAULT_ODR,
+         HALL_DEFAULT_FILTER, HALL_TARGET_ALL)]
+
+
+def test_a_hall_range_that_is_neither_5_nor_50_mt_is_refused(link, heard):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.set_hall_range(RIGHT, 2)
+
+    assert refused.value.code == "bad_hall_range"
+    assert link.written == []
+
+
+def test_after_a_range_change_raw_messages_say_the_new_range(link, heard):
+    heard.subscribe("raw")
+    link.feed(packet_line(RIGHT))
+    assert heard.read("raw", timeout=2.0).hall_range is None
+
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    link.feed(packet_line(RIGHT))
+
+    assert heard.read("raw", timeout=2.0).hall_range == HALL_RANGE_50MT
+
+
+@pytest.fixture
+def calibrated(link, clock):
+    with pandora_sdk.Local(CALIBRATED, link=link, defaults={}, clock=clock) as opened:
+        link.feed(packet_line(RIGHT), packet_line(LEFT))
+        assert wait(lambda: len(opened.devices()) == 2)
+        yield opened
+
+
+def test_after_a_range_change_the_calibration_is_rescaled_to_it(link, calibrated):
+    before = calibrated.calibration(RIGHT)
+
+    calibrated.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    link.feed(packet_line(RIGHT))
+    assert wait(lambda: calibrated.calibration(RIGHT).hall_range == HALL_RANGE_50MT)
+
+    after = calibrated.calibration(RIGHT)
+    assert (before.hall_range, before.extrapolated) == (HALL_RANGE_5MT, False)
+    assert after.extrapolated
+    assert after.calibrations["Index"]["prox_min"] != before.calibrations["Index"]["prox_min"]
+
+
+def test_a_glove_that_comes_back_after_going_silent_is_put_on_its_range_again(
+        link, heard, clock):
+    """It may have been switched off and on, which puts it back on the range
+    it powers up in; the app sends its range again then, too."""
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    clock.now += 3.0
+
+    link.feed(packet_line(RIGHT))
+    assert wait(lambda: len(sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)) == 2)
+
+    assert sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)[1][3] == HALL_RANGE_50MT
+
+
+# ── calibration bounds ───────────────────────────────────────────────────────
+
+def test_calibration_of_a_glove_is_the_bounds_its_pipeline_normalises_with(calibrated):
+    bounds = calibrated.calibration(RIGHT)
+
+    assert (bounds.device, bounds.hall_range, bounds.extrapolated) == (
+        RIGHT, HALL_RANGE_5MT, False)
+    assert bounds.calibrations["Index"]["prox_min"] == (-800.0, 140.0, 2200.0)
+    assert bounds.calibrations["Index"]["meta_max"] == (10.0, 8.0, 2900.0)
+
+
+def test_calibration_of_an_uncalibrated_glove_has_no_bounds(calibrated):
+    assert calibrated.calibration(LEFT).calibrations == {}
+
+
+def test_calibration_with_no_glove_named_is_every_glove_heard(calibrated):
+    assert sorted(calibrated.calibration()) == [LEFT, RIGHT]
+
+
+def test_calibration_of_a_glove_not_heard_is_refused(calibrated):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        calibrated.calibration(STRANGER)
+
+    assert refused.value.code == "unknown_device"
+
+
+def test_the_latest_calibration_is_the_one_in_use_now(calibrated):
+    assert calibrated.latest_calibration(RIGHT) == calibrated.calibration(RIGHT)
+    assert calibrated.latest_calibration(STRANGER) is None
+
+
+# ── the debug stream ─────────────────────────────────────────────────────────
+
+def test_the_debug_stream_carries_the_pipelines_values_named_by_the_keys(link, gloves):
+    granted = gloves.subscribe("debug", keys=["raw.*"])
+    link.feed(packet_line(RIGHT), packet_line(RIGHT))
+
+    first = gloves.read("debug", timeout=2.0)
+    second = next(gloves.debug())
+
+    assert granted.keys == ("raw.*",)
+    assert (first.device, first.hand, first.seq, second.seq) == (RIGHT, "right", 1, 2)
+    assert first.values and all(name.startswith("raw.") for name in first.values)
+
+
+def test_the_debug_stream_has_the_values_of_every_stage_when_asked_for_all(link, gloves):
+    gloves.subscribe("debug")
+    link.feed(packet_line(RIGHT))
+
+    stages = {name.split(".")[0] for name in gloves.read("debug", timeout=2.0).values}
+
+    assert {"raw", "curl", "splay"} <= stages

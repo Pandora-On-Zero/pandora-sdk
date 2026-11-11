@@ -3,10 +3,10 @@ and tracking packets built from the packet's layout."""
 import struct
 import threading
 import time
-from typing import List
+from typing import List, Tuple
 
 from pandora_core.packet_layout import TRACKING_FORMAT
-from pandora_core.serial_framing import encode_frame
+from pandora_core.serial_framing import decode_frame, encode_frame
 
 
 def packet_line(device: str, glove_ms: int = 1000, hall: int = 100) -> bytes:
@@ -27,6 +27,8 @@ class Link:
         self._arrived = bytearray()
         self._lock = threading.Lock()
         self.unplugged = False
+        # Writes fail as a port's do when the receiver stops taking them.
+        self.refuses_writes = False
         # Every write to the port, in order.
         self.written: List[bytes] = []
 
@@ -50,8 +52,17 @@ class Link:
         return len(self._arrived)
 
     def write(self, data: bytes) -> int:
+        if self.refuses_writes:
+            raise OSError("Write timeout")
         self.written.append(bytes(data))
         return len(data)
 
     def close(self) -> None:
         self.is_open = False
+
+
+def sent(link: Link, kind: int, layout: str) -> List[Tuple]:
+    """The commands of type *kind* written to *link*, unpacked, in order."""
+    payloads = [decode_frame(line) for line in link.written]
+    return [struct.unpack(layout, payload) for payload in payloads
+            if payload is not None and payload[0] == kind]
