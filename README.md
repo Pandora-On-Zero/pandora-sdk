@@ -412,6 +412,32 @@ What is different without the app:
 | Raw `hall` with gap fill on | A sensor that read all zeros carries the reading gap fill gave it | The glove's own zeros. Its cancelled counts are the filled reading, cancelled, as through the app |
 
 
+#### The receiver's own lines, and damaged frames
+
+Among the gloves' frames the receiver sends lines of text about itself and
+the link: `BL:` (the radio link to a glove), `PONG`, `DFU:` (firmware
+updates) and others. `gloves.on_line(callback)` hands each one to your
+function, without its line end, in order with the packets:
+
+```python
+gloves.on_line(lambda text: print("receiver:", text))     # "BL:CONN NRF_GLOVE_E5D1", ...
+print(gloves.packets, gloves.bad_frames)                  # tracking packets, damaged frames
+```
+
+- It runs on the reading thread, as an [`on()` callback](#a-callback-per-message)
+  does, with the same rules: keep it short; if it raises, the source ends
+  with `Disconnected` code `callback_failed`. `on_line(None)` stops it.
+  Without it, the lines are dropped.
+- A line of bytes no status line has (the tail of a frame cut off when the
+  port was opened) is not passed on.
+- `gloves.bad_frames` counts the binary frames that failed their COBS or CRC
+  check, beside `gloves.packets`, the tracking packets read. Each frame is
+  told apart by `pandora-core`'s own framing code, not a copy of it.
+- Only without the app: the app keeps the receiver's lines to itself. A line
+  callback is not a stream: the lines belong to no glove, so they have no
+  `latest()`, no subscription and no queue (put them on a `queue.Queue` from
+  the callback if you want one).
+
 #### Opening the receiver yourself
 
 `open_receiver()` finds and opens the receiver itself. A program that wants to

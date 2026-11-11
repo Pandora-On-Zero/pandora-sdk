@@ -1147,3 +1147,81 @@ def test_a_callback_that_raises_ends_the_source_with_its_error(link, gloves):
 def test_a_callback_for_a_stream_that_does_not_exist_is_refused(gloves):
     with pytest.raises(ValueError, match="no stream 'hands'"):
         gloves.on("hands", print)
+
+
+# ── the receiver's text lines, and damaged frames ────────────────────────────
+
+def damaged(line: bytes) -> bytes:
+    """*line* with one byte of its body changed so its check fails, still
+    one line."""
+    changed = bytearray(line)
+    for at in range(len(changed) // 2, len(changed) - 1):
+        if changed[at] ^ 0x40 not in (0x00, 0x0A):
+            changed[at] ^= 0x40
+            return bytes(changed)
+    raise AssertionError("no byte to change")
+
+
+def test_the_receivers_text_lines_reach_on_line_in_order_on_the_reader_thread(link, gloves):
+    lines = []
+    gloves.on_line(lambda text: lines.append((text, threading.current_thread().name)))
+    gloves.subscribe("raw")
+
+    link.feed(b"BL:CONN NRF_GLOVE_E5D1\r\n", packet_line(RIGHT), b"PONG\n", packet_line(RIGHT))
+    assert wait(lambda: len(lines) == 2 and gloves.packets == 2)
+
+    assert lines == [("BL:CONN NRF_GLOVE_E5D1", "pandora-sdk-receiver"),
+                     ("PONG", "pandora-sdk-receiver")]
+    assert [gloves.read("raw", timeout=2.0).seq for _ in range(2)] == [1, 2]
+
+
+def test_a_damaged_frame_is_counted_and_left_out(link, gloves):
+    gloves.subscribe("raw")
+
+    feed(link, gloves, packet_line(RIGHT, glove_ms=1))
+    link.feed(damaged(packet_line(RIGHT, glove_ms=2)), b"DFU:READY\n")
+    feed(link, gloves, packet_line(RIGHT, glove_ms=3))
+
+    assert gloves.bad_frames == 1
+    assert [gloves.read("raw", timeout=2.0).glove_ms for _ in range(2)] == [1, 3]
+    assert gloves.packets == 2
+
+
+def test_the_tail_of_a_frame_cut_off_when_the_port_opened_is_neither_text_nor_damage(
+        link, gloves):
+    lines = []
+    gloves.on_line(lines.append)
+    tail = packet_line(RIGHT)[40:]
+    assert any(byte < 0x09 or byte >= 0x80 for byte in tail[:-1])
+
+    link.feed(tail, b"BL:READY\n")
+    assert wait(lambda: lines)
+
+    assert lines == ["BL:READY"]
+    assert gloves.bad_frames == 0
+
+
+def test_with_on_line_given_none_text_lines_are_dropped_again(link, gloves):
+    lines = []
+    gloves.on_line(lines.append)
+    link.feed(b"PONG:1\n")
+    assert wait(lambda: lines)
+
+    gloves.on_line(None)
+    link.feed(b"PONG:2\n")
+    feed(link, gloves, packet_line(RIGHT))
+
+    assert lines == ["PONG:1"]
+
+
+def test_an_on_line_callback_that_raises_ends_the_source_with_its_error(link, gloves):
+    def _broken(text):
+        raise ValueError("bad line")
+
+    gloves.on_line(_broken)
+    link.feed(b"BL:CONN\n")
+
+    assert gloves.wait_ended(2.0)
+    error = gloves.end_error
+    assert error is not None and error.code == "callback_failed"
+    assert isinstance(error.__cause__, ValueError) and "bad line" in str(error)

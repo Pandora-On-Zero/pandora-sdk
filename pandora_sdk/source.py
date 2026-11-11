@@ -76,7 +76,7 @@ DISCONNECTED_CODES = {
     "pipeline_failed": "a glove's pipeline raised (without the app)",
     "app_closed": "the app closed the connection (it quit, or turned Protocol off)",
     "connection_lost": "the connection to the app broke",
-    "callback_failed": "a callback given to on() raised",
+    "callback_failed": "a callback given to on() or Local.on_line() raised",
 }
 
 

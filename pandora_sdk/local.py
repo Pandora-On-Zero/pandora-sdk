@@ -63,7 +63,7 @@ from pandora_core.protocol import (Calibration, Device, HallRange, Haptics, Pace
                                    Subscription)
 from pandora_core.receiver import ReceiverPort
 from pandora_core.scope import shipped_defaults
-from pandora_core.serial_framing import encode_frame
+from pandora_core.serial_framing import decode_frame, encode_frame, is_binary_frame
 from pandora_core.tuning import Tuning
 
 from pandora_sdk.source import CallbackFailed, ConnectionFailed, PandoraError, ServerError, Source
@@ -166,11 +166,14 @@ def send_command(link: Any, payload: bytes) -> None:
                           "this, unplug the receiver and plug it back in.") from None
 
 
-def link_packets(link: Any,
-                 decoder: Optional[PacketDecoder] = None) -> Iterator[Optional[GlovePacket]]:
+def link_packets(link: Any, decoder: Optional[PacketDecoder] = None,
+                 other: Optional[Callable[[bytes], None]] = None
+                 ) -> Iterator[Optional[GlovePacket]]:
     """Each tracking packet as *link* delivers it, from any glove, and None
     for a read that held none, so the reader can stop or lose patience.
-    Never ends; a failing port raises its OSError (link_failure words it)."""
+    Every line that held no packet (the core's packet_from_line says which)
+    goes to *other*, in order with the packets. Never ends; a failing port
+    raises its OSError (link_failure words it)."""
     decoder = decoder or PacketDecoder()
     splitter = receiver.LineSplitter()
     while True:
@@ -180,8 +183,31 @@ def link_packets(link: Any,
             if packet is not None:
                 found = True
                 yield packet
+            elif other is not None:
+                other(line)
         if not found:
             yield None
+
+
+def is_damaged_frame(line: bytes) -> bool:
+    """Whether a line that held no packet is a binary frame that failed its
+    COBS or CRC check (pandora_core.serial_framing's decode_frame)."""
+    return is_binary_frame(line) and decode_frame(line) is None
+
+
+def text_of(line: bytes) -> Optional[str]:
+    """A receiver status line (BL:, PONG:, DFU: ...) without its line end,
+    for a line that held no packet; None for a binary frame, an empty line,
+    or bytes no status line has (the tail of a frame cut off when the port
+    was opened, which lost the byte that marks a frame)."""
+    if is_binary_frame(line) or _NOT_TEXT.search(line):
+        return None
+    return line.decode("ascii").strip() or None
+
+
+# Bytes no receiver status line holds: control characters other than tab and
+# the line end, and anything past ASCII.
+_NOT_TEXT = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\xff]")
 
 
 def link_failure(failed: OSError) -> str:
@@ -269,6 +295,10 @@ class Local(Source):
         self.unprofiled: Set[str] = set()
         # Tracking packets read so far, from any glove.
         self.packets = 0
+        # Binary frames read so far that failed their COBS or CRC check.
+        self.bad_frames = 0
+        # The function given each receiver text line (on_line()).
+        self._on_line: Optional[Callable[[str], object]] = None
         self._link = open_link(port) if link is None else link
         self._running = True
         self._reader = threading.Thread(target=self._read_link, name="pandora-sdk-receiver",
@@ -439,7 +469,7 @@ class Local(Source):
         """The reader thread: packets to frames until the port ends."""
         why, code, cause = "", "closed", None
         try:
-            for packet in link_packets(self._link, self._decoder):
+            for packet in link_packets(self._link, self._decoder, self._on_other):
                 if not self._running:
                     break
                 if packet is not None:
@@ -452,6 +482,37 @@ class Local(Source):
         except Exception as failed:  # the pipeline's own failure must not pass for silence
             why, code, cause = f"a glove's pipeline failed ({failed!r})", "pipeline_failed", failed
         self._end(why, code, cause)
+
+    def on_line(self, callback: Optional[Callable[[str], object]]) -> None:
+        """Call *callback* with each text line the receiver sends among the
+        frames (its status: "BL:CONN ...", "PONG", "DFU:..." and the like),
+        without its line end, in order with the packets; None stops. As
+        with on(), it runs on the thread that reads the receiver, so keep it
+        short, and if it raises the source ends (Disconnected, code
+        "callback_failed"). Without it, text lines are dropped. Only without
+        the app: the app keeps the receiver's lines to itself."""
+        with self._changed:
+            self._on_line = callback
+
+    def _on_other(self, line: bytes) -> None:
+        """A line from the receiver that held no tracking packet: a damaged
+        frame (counted), a status line (to on_line), or neither (a frame of
+        another kind, the tail of a frame cut off when the port opened)."""
+        if is_damaged_frame(line):
+            with self._changed:
+                self.bad_frames += 1
+            return
+        with self._changed:
+            callback = self._on_line
+        text = text_of(line) if callback is not None else None
+        if callback is None or text is None:
+            return
+        try:
+            callback(text)
+        except Exception as failed:
+            _log.exception("the callback for the receiver's lines raised")
+            raise CallbackFailed(f"the callback for the receiver's lines raised "
+                                 f"{failed!r}") from failed
 
     def _on_packet(self, packet: GlovePacket) -> None:
         device = packet.device_id
