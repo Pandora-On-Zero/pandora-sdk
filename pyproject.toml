@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandora-sdk"
-version = "0.2.1"
+version = "0.2.2"
 description = "Hands from the 01 Glove app in a few lines of Python"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ dependencies = [
     # commit of the private Pandora repo; see README, "Installing". The core's
     # base install is only its wire layer: `pipeline` brings numpy for the hand
     # pipeline (Glove, calibration), `serial` brings pyserial for the receiver.
-    "pandora-core[pipeline,serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@43ffd5e8c68314cf84ad792ad878187f80248261#subdirectory=pandora-core",
+    "pandora-core[pipeline,serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@9cd9df028d833058c8c6a455f1de11b273279413#subdirectory=pandora-core",
     "websockets>=13",
 ]
 
