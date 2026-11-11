@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     # The message format is pandora-core's, not a copy of it. Pinned to a
     # commit of the private Pandora repo; see README, "Installing".
-    "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@7f0e318a1c9ab79fe348f23da25bf722172cc204#subdirectory=pandora-core",
+    "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@661b64c0aa914ecad881fe7c92e7ca0d4b1f6620#subdirectory=pandora-core",
     "websockets>=13",
 ]
 
