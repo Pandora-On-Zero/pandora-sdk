@@ -19,9 +19,9 @@ A glove's pipeline runs only while a frames or debug subscription includes
 it, or a raw one with cancelled (the counts after earth-field cancellation
 exist only once the pipeline has had the packet); with plain raw alone, its
 packets make the raw message and nothing else. Its first packet still goes
-through a pipeline, which loads the profile that calibration() reads. A pipeline that missed packets starts again as a new one
-at the next packet it is wanted for, so its smoothing begins there, as on a
-glove's first packet.
+through a pipeline, which loads the profile that calibration() reads. A
+pipeline that missed packets starts again as a new one at the next packet it
+is wanted for, so its smoothing begins there, as on a glove's first packet.
 
 Each glove needs a profile: its hand and the calibration it carries. `pandora
 calibrate` (pandora_sdk/calibrate.py) writes one, into default_profiles_dir()
@@ -250,8 +250,8 @@ class Local(Source):
         """Ask for a stream, as Client.subscribe does; nothing is delivered
         before. Judged by the same code as the app's server. Raw with
         *cancelled* keeps each glove it includes going through its pipeline,
-        as frames do, and each of its messages is made after the pipeline
-        has had the packet."""
+        as frames do, and each of its messages is sent once the pipeline has
+        had the packet; hall is still the glove's own counts."""
         asked = Subscription(stream, None if devices is None else tuple(devices), tuple(hands),
                              rate_hz, bones, tuple(keys), cancelled)
         granted = _judged(Subscription.from_message, asked.to_message())

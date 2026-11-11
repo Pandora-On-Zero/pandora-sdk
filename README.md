@@ -54,14 +54,10 @@ Without it pip may keep the `pandora-core` it already has, even with
 commit it came from, and keeps one whose version is the one asked for. That is
 why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
-This version needs `pandora-core` 0.2.0.
-
-Version 0.2.0 covers two commits of the core: `45c367d`, which the previous
-`pandora-sdk` pinned, and `7f0e318`, pinned now (the frame checksum computed in
-C, which makes reading a packet about five times faster, and a write timeout on
-the receiver's port). A fresh install gets the newer one. An install that
-already has 0.2.0 keeps whichever commit it has until you reinstall with
-`--force-reinstall`.
+This version needs `pandora-core` 0.3.0 (commit `661b64c`), which added
+[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)
+to raw readings. An install that has 0.2.0 moves to it with the
+`--force-reinstall` above.
 
 ## Before you connect
 
@@ -99,6 +95,7 @@ it; two gloves can be worn on the same hand.
 | `rate_hz` | `0` | Messages a second per glove at most. `0` is every one, about 200 a second |
 | `bones` | `True` | Whether each frame carries the 31-bone skeleton, which is most of its size |
 | `keys` | `["*"]` | Debug only: which values, as name patterns (`*` any run of characters, `?` one) |
+| `cancelled` | `False` | Raw only: each reading also carries the Hall counts after earth-field cancellation ([below](#counts-after-earth-field-cancellation)) |
 
 There are two ways to take what arrives, and a third for a program that must
 not wait on a queue ([a callback](#a-callback-per-message)).
@@ -149,6 +146,40 @@ for reading in gloves.raw():
 
 A raw reading has the same `device`, `hand`, `seq`, `time_us` and
 `wall_time_us` as a frame, and `hall_range`, the range its counts are in.
+
+#### Counts after earth-field cancellation
+
+With earth-field cancellation on for a glove, its pipeline subtracts the
+earth's field, read by a reference sensor, from each Hall reading before it
+normalises the curl. The [calibration bounds](#calibration-bounds) are in
+those cancelled counts; `hall`, what the glove sent, is from before. A program
+that maps counts between the bounds itself asks for the cancelled ones:
+
+```python
+glove = "NRF_GLOVE_E5D1"
+gloves.subscribe("raw", devices=[glove], cancelled=True)
+index = gloves.calibration(glove).calibrations["Index"]
+for reading in gloves.raw():
+    counts = reading.hall_cancelled[1][0]    # index, proximal: the space of index["prox_min"], index["prox_max"]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `hall_cancelled` | Shaped as `hall`: per finger, the proximal and metacarpal counts as the pipeline normalised them, after gap fill and earth-field cancellation (and cancellation's output smoothing, when that is set) |
+| `thumb_distal_cancelled` | The same for the thumb's third sensor, or `None` when the glove has none |
+| `earth_cancelled` | Whether the earth's field was subtracted from any sensor of this packet |
+
+- When nothing was cancelled (cancellation off for the glove, no hard/soft-iron
+  fit, or nothing usable from the reference), `earth_cancelled` is `False` and
+  the cancelled counts are equal to `hall` and `thumb_distal`.
+- `hall` is the glove's own counts either way. The reference sensor has no
+  cancelled counts: `reference` is the same in both spaces.
+- Without `cancelled=True` the three fields are `None`.
+- An app from before this option (no `"raw_cancelled"` in
+  `gloves.server.capabilities`) grants the subscription with `cancelled` off
+  and sends none; `subscribe()` returns what it granted.
+- Without the app, a raw subscription with `cancelled=True` runs the pipeline
+  of each glove it includes, as frames do (see [Raw only](#raw-only)).
 
 ### A callback per message
 
@@ -293,6 +324,7 @@ What is different without the app:
 | `latest_calibration()` | The newest the app sent | Read when asked, so never behind |
 | Debug values | Every stage the app runs | Every stage the glove's pipeline runs |
 | A command for a glove | Refused unless it is connected | Refused unless it has a profile and sent in the last two seconds |
+| Raw `hall` with gap fill on | A sensor that read all zeros carries the reading gap fill gave it | The glove's own zeros. Its cancelled counts are the filled reading, cancelled, as through the app |
 
 
 One thread runs every glove's pipeline. On the PC this was written on, a
@@ -302,17 +334,20 @@ glove sends 200 a second.
 #### Raw only
 
 A glove's pipeline runs only while a `frames` or `debug` subscription includes
-it. With neither (only `raw`, or nothing yet), each packet makes the raw
-message and nothing else: about 30 microseconds a packet on the PC this was
-written on, against 0.6 to 1.9 milliseconds with the pipeline. A frames
-subscription narrowed to one hand or one glove leaves the others raw only.
+it, or a `raw` one with `cancelled=True`, whose counts exist only once the
+pipeline has had the packet. With none of these (only plain `raw`, or nothing
+yet), each packet makes the raw message and nothing else: about 30
+microseconds a packet on the PC this was written on, against 0.6 to 1.9
+milliseconds with the pipeline. A frames subscription narrowed to one hand or
+one glove leaves the others raw only.
 
 - `calibration()`, `latest_calibration()` and `set_hall_range` work as
   ever: a glove's first packet, and its first after a range change, still go
   through a pipeline, which loads its profile and its range.
-- **Subscribing to frames later starts that glove's pipeline afresh at the
-  next packet**, as when the glove is switched on: its smoothing and other
-  filters begin there and carry nothing from before. Starting costs a
+- **Subscribing to frames (or to raw with `cancelled`) later starts that
+  glove's pipeline afresh at the next packet**, as when the glove is switched
+  on: its smoothing and other filters, earth-field cancellation's among them,
+  begin there and carry nothing from before. Starting costs a
   millisecond or two, once, on that packet.
 - Through the app nothing changes: the app makes hands either way.
 
@@ -461,7 +496,10 @@ package's message code shows up here as a failing test and is not shared by
 both ends. Reading the receiver, sending to a glove and calibrating are
 tested against a made-up serial port, `tests/fakelink.py`, fed packets built
 from the tracking packet's layout; the firmware update against a made-up
-receiver that answers the DFU protocol (`tests/test_firmware.py`). No test
+receiver that answers the DFU protocol (`tests/test_firmware.py`). The counts
+after earth-field cancellation are also tested on 40 packets recorded from a
+glove with cancellation on, copied from `pandora-core`'s golden vectors
+(`tests/data/right_earth.json`). No test
 can open a real port (`tests/conftest.py` refuses it), and every test gets a
 temporary home folder, so none reads or writes your `.pandora/profiles`.
 
@@ -471,15 +509,12 @@ commit you pin must carry a higher `pandora-core` version** (its
 `pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
 installed core whose version matches, whatever commit it came from, so a pin
 to a new commit with the same version leaves people on the old core. The pin
-is at 0.2.0 now, and has been for two commits: the move from `45c367d` to
-`7f0e318` kept the core's version, so only a fresh install or a
-`--force-reinstall` gets the newer commit (see [Installing](#installing)).
-Then install again with `pip install --force-reinstall -e ".[dev]"`, or, to
-replace only the core, as this repository's `.venv` was:
+is at 0.3.0 now (`661b64c`). Then install again with
+`pip install --force-reinstall -e ".[dev]"`, or, to replace only the core:
 
 ```bash
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
-  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@7f0e318a1c9ab79fe348f23da25bf722172cc204#subdirectory=pandora-core"
+  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@661b64c0aa914ecad881fe7c92e7ca0d4b1f6620#subdirectory=pandora-core"
 ```
 
 ## Not here yet
