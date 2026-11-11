@@ -14,7 +14,7 @@ with pandora_sdk.connect() as gloves:
         print(hand.angles_deg[1])    # index: MCP, PIP, DIP flexion, MCP abduction
 ```
 
-**Status:** version 0.1, private. It reads hands, raw readings and the
+**Status:** version 0.2, private. It reads hands, raw readings and the
 pipeline's debug values, through a running app or straight from the receiver
 with no app. It sends haptics and Hall settings to a glove, gives each glove's
 calibration bounds, calibrates a glove with no app (`pandora calibrate`) and
@@ -54,6 +54,8 @@ Without it pip may keep the `pandora-core` it already has, even with
 commit it came from, and keeps one whose version is the one asked for. That is
 why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
+The same goes for `pandora-sdk` in a program that pins it to a commit, which
+is why its version goes up with every change a program may depend on.
 This version needs `pandora-core` 0.4.0 (commit `56b63dd`), which added the
 battery voltage and two power flags to raw readings (0.3.0 had added
 [the counts after earth-field cancellation](#counts-after-earth-field-cancellation)).
@@ -708,6 +710,14 @@ is at 0.4.0 now (`56b63dd`). Then install again with
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
   pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@56b63ddb0e1ba323c291aa39f18a812b82f02083#subdirectory=pandora-core"
 ```
+
+**This library's own `version`** (`pyproject.toml`) follows the same rule as
+the core's: it goes up in the same change as anything a program may depend on
+(a new call, option or field, a changed behaviour, a moved core pin). Programs
+pin `pandora-sdk` to a commit too, and pip keeps an installed `pandora-sdk`
+whose version matches, so without the raise a program whose pin moved keeps
+running the old library without saying so. A change that only touches the
+tests or this README needs none.
 
 ## Not here yet
 
