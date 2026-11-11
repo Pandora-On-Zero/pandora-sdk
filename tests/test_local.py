@@ -654,6 +654,138 @@ def test_a_glove_that_comes_back_after_going_silent_is_put_on_its_range_again(
     assert sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)[1][3] == HALL_RANGE_50MT
 
 
+# ── the full Hall config, and ranges not sent again ──────────────────────────
+
+def hall_sent(link):
+    return sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)
+
+
+def test_send_hall_config_writes_exactly_the_settings_given(link, heard):
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, osr=0, odr=6, filter=5, target=4)
+
+    assert hall_sent(link) == [(GLOVE_PKT_HALL_CONFIG, ID, 0, HALL_RANGE_50MT, 0, 6, 5, 4)]
+
+
+def test_send_hall_config_by_default_is_every_sensor_on_its_power_up_settings(link, heard):
+    heard.send_hall_config(RIGHT)
+
+    assert hall_sent(link) == [(GLOVE_PKT_HALL_CONFIG, ID, 0, HALL_RANGE_5MT, HALL_DEFAULT_OSR,
+                                HALL_DEFAULT_ODR, HALL_DEFAULT_FILTER, HALL_TARGET_ALL)]
+
+
+def test_send_hall_config_can_reset_the_sensors_to_the_firmware_defaults(link, heard):
+    heard.send_hall_config(RIGHT, reset=True)
+
+    assert hall_sent(link)[0][2] == 1
+
+
+@pytest.mark.parametrize("sensor, target", [("Index/Meta", 4), ("Thumb/Distal", 2),
+                                            ("Reference", 15)])
+def test_send_hall_config_names_a_sensor_by_its_key(link, heard, sensor, target):
+    heard.send_hall_config(RIGHT, target=sensor)
+
+    assert hall_sent(link)[0][-1] == target
+
+
+@pytest.mark.parametrize("settings, code", [
+    ({"hall_range": 2}, "bad_hall_range"), ({"osr": 2}, "bad_hall_config"),
+    ({"odr": 9}, "bad_hall_config"), ({"filter": 8}, "bad_hall_config"),
+    ({"target": 5}, "bad_hall_config"), ({"target": "Index/Distal"}, "bad_hall_config"),
+    ({"filter": -1}, "bad_hall_config")])
+def test_hall_settings_the_glove_has_no_value_for_are_refused_and_not_sent(
+        link, heard, settings, code):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.send_hall_config(RIGHT, **settings)
+
+    assert refused.value.code == code
+    assert link.written == []
+
+
+def test_a_hall_config_for_a_glove_not_sending_is_refused(link, heard, clock):
+    clock.now += 3.0
+
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.send_hall_config(RIGHT, reset=True)
+
+    assert refused.value.code == "unknown_device"
+
+
+def come_back(link, gloves, clock):
+    """The right glove silent for 3 s, then sending again."""
+    clock.now += 3.0
+    feed(link, gloves, packet_line(RIGHT))
+
+
+def test_a_hall_config_is_not_sent_again_when_the_glove_comes_back(link, heard, clock):
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 1
+
+
+def test_a_range_set_with_resend_off_is_not_sent_again_when_the_glove_comes_back(
+        link, heard, clock):
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT, resend=False)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 1
+
+
+def test_a_range_set_with_resend_off_forgets_the_one_remembered_before(link, heard, clock):
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    heard.set_hall_range(RIGHT, HALL_RANGE_5MT, resend=False)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 2
+
+
+def test_a_reset_forgets_the_range_remembered_and_raw_says_the_default_range(
+        link, heard, clock):
+    heard.subscribe("raw")
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    feed(link, heard, packet_line(RIGHT))
+    assert heard.read("raw", timeout=2.0).hall_range == HALL_RANGE_50MT
+
+    heard.send_hall_config(RIGHT, reset=True)
+    come_back(link, heard, clock)
+
+    assert [command[2] for command in hall_sent(link)] == [0, 1]
+    assert heard.read("raw", timeout=2.0).hall_range == HALL_RANGE_5MT
+
+
+def test_after_a_hall_config_for_every_sensor_raw_messages_say_its_range(link, heard):
+    heard.subscribe("raw")
+
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+    feed(link, heard, packet_line(RIGHT))
+
+    reading = heard.read("raw", timeout=2.0)
+    assert (reading.hall_range, reading.sensor_ranges) == (HALL_RANGE_50MT, {})
+
+
+def test_after_a_hall_config_for_one_sensor_raw_messages_say_that_sensors_range(link, heard):
+    heard.subscribe("raw")
+
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, target="Index/Prox")
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, target=15)
+    feed(link, heard, packet_line(RIGHT))
+
+    reading = heard.read("raw", timeout=2.0)
+    assert (reading.hall_range, reading.sensor_ranges) == (
+        None, {"Index/Prox": HALL_RANGE_50MT, "Reference": HALL_RANGE_50MT})
+
+
+def test_after_a_hall_config_the_calibration_is_rescaled_to_its_range(link, calibrated):
+    calibrated.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+    link.feed(packet_line(RIGHT))
+
+    assert wait(lambda: calibrated.calibration(RIGHT).hall_range == HALL_RANGE_50MT)
+    assert calibrated.calibration(RIGHT).extrapolated
+
+
 # ── calibration bounds ───────────────────────────────────────────────────────
 
 def test_calibration_of_a_glove_is_the_bounds_its_pipeline_normalises_with(calibrated):

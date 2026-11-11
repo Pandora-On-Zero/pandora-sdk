@@ -332,6 +332,24 @@ def test_a_hall_range_that_is_neither_5_nor_50_mt_is_refused(gloves):
     assert refused.value.code == "bad_hall_range"
 
 
+def test_set_hall_range_takes_resend_and_sends_the_same_request(app, gloves):
+    """The app never sends this range again: it sends its own setting."""
+    gloves.set_hall_range(RIGHT, 1, resend=False)
+
+    assert app.of_type("set_hall_range") == [
+        {"type": "set_hall_range", "device": RIGHT, "hall_range": 1}]
+
+
+def test_the_full_hall_config_through_the_app_is_refused_and_nothing_is_sent(app, gloves):
+    """Hall settings beyond the range are the app's, and the protocol has no
+    message for them."""
+    with pytest.raises(pandora_sdk.ServerError, match="the app's") as refused:
+        gloves.send_hall_config(RIGHT, reset=True)
+
+    assert refused.value.code == "not_supported"
+    assert [m["type"] for m in app.received] == ["hello"]
+
+
 def test_a_reply_for_another_glove_is_not_taken_for_this_ones(app, gloves):
     app.replies["haptics"] = [{"type": "haptics_sent", "device": LEFT}]
 

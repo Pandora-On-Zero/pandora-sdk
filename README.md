@@ -304,6 +304,46 @@ app, its own haptic settings still apply: which motors may run and the
 wearer's strength. A Hall range set this way does not change the app's own
 setting, which goes back to the glove when it next connects.
 
+#### The full Hall config (without the app)
+
+`set_hall_range` puts every sensor on a range with the other settings they
+power up with. Without the app, `send_hall_config` sends one Hall command
+exactly as you give it:
+
+```python
+gloves.send_hall_config(glove, reset=True)                       # back to the firmware's defaults
+gloves.send_hall_config(glove, hall_range=1, odr=6, filter=2)    # every sensor: +-50 mT, 700 Hz
+gloves.send_hall_config(glove, hall_range=1, target="Index/Prox")    # one sensor
+```
+
+| Argument | Default (what a glove powers up with) | Meaning |
+| --- | --- | --- |
+| `reset` | `False` | Back to the firmware's defaults |
+| `hall_range` | `0` | `0` is +-5 mT, `1` is +-50 mT |
+| `osr` | `1` | Oversampling: `0` low, `1` high |
+| `odr` | `4` (200 Hz) | Output rate, an index into `pandora_core.packet_layout.HALL_ODR_HZ` (10, 15, 50, 100, 200, 500, 700, 1000, 1400 Hz) |
+| `filter` | `3` | Filtering, `0` (least) to `7` (most) |
+| `target` | every sensor (`0xFF`) | One sensor, by its id or its key: `"Thumb/Prox"`, `"Thumb/Meta"`, `"Thumb/Distal"`, `"Index/Prox"`, `"Index/Meta"`, the same for `Middle`, `Ring` and `Pinky`, or `"Reference"` |
+
+- A value the glove has no setting for raises `ServerError` with
+  `bad_hall_range` or `bad_hall_config`, and nothing is sent; a glove that
+  has not sent in the last two seconds, `unknown_device`.
+- The range it puts the sensors on (the default range after a reset) is
+  what the glove's raw readings say (`hall_range`, or `sensor_ranges` for one
+  sensor) and what its calibration is rescaled to, from its next packet.
+- **Nothing is sent again by itself.** `set_hall_range` sends its range again
+  when the glove comes back after two seconds of silence (it may have been
+  switched off and on, which puts it back on its defaults);
+  `send_hall_config` does not, and forgets a range `set_hall_range`
+  remembered for that glove. A program that sends its own Hall settings
+  sends them again itself. `set_hall_range(glove, range, resend=False)` sends
+  a range that is not sent again either, and forgets the one remembered.
+- **Through the app it is refused**: `ServerError` with code `not_supported`,
+  and nothing is sent. Hall settings beyond the range are the app's (Debug >
+  Hall Effect Firmware Settings), and the protocol has no message for them.
+  Through the app `resend` changes nothing: the app sends its own setting
+  when the glove next connects, never this range.
+
 ### Without the app
 
 `open_receiver()` reads the receiver itself and runs each glove's pipeline in
@@ -363,7 +403,8 @@ What is different without the app:
 | | Through the app | Without the app |
 | --- | --- | --- |
 | Haptics | The app's haptic settings apply (which motors, the wearer's strength) | Sent exactly as given |
-| `set_hall_range` | The app's other Hall settings and per-sensor tuning go with it; returns the app's note | Sent with the settings the sensors power up with, to every sensor (a sensor the profile had on its own range is on the new one too); returns `""`. Its pipeline takes the range from the glove's next packet, and the range is sent again when the glove comes back after two seconds of silence (it may have been switched off and on). The profile file is not changed |
+| `set_hall_range` | The app's other Hall settings and per-sensor tuning go with it; returns the app's note | Sent with the settings the sensors power up with, to every sensor (a sensor the profile had on its own range is on the new one too); returns `""`. Its pipeline takes the range from the glove's next packet, and the range is sent again when the glove comes back after two seconds of silence (it may have been switched off and on), unless `resend=False`. The profile file is not changed |
+| `send_hall_config` | Refused (`not_supported`) | Sent exactly as given; never sent again by itself ([above](#the-full-hall-config-without-the-app)) |
 | `calibration()` | The app's bounds | The bounds in the glove's profile, as its pipeline uses them; only gloves heard so far |
 | `latest_calibration()` | The newest the app sent | Read when asked, so never behind |
 | Debug values | Every stage the app runs | Every stage the glove's pipeline runs |

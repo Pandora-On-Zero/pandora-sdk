@@ -56,7 +56,9 @@ from pandora_core.debug_tap import get_debug_tap
 from pandora_core.glove import Glove, Profile
 from pandora_core.packet_decoder import GlovePacket, PacketDecoder
 from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
-                                        HALL_TARGET_ALL)
+                                        HALL_DEFAULT_RANGE, HALL_FILTER_MAX, HALL_ODR_HZ,
+                                        HALL_OSR_HIGH, HALL_RANGE_5MT, HALL_RANGE_50MT,
+                                        HALL_SENSOR_KEYS, HALL_TARGET_ALL, hall_target_id)
 from pandora_core.protocol import (Calibration, Device, HallRange, Haptics, Pacer, ProtocolError,
                                    Subscription)
 from pandora_core.receiver import ReceiverPort
@@ -247,11 +249,12 @@ class Local(Source):
         self._seq: Dict[str, int] = {}
         self._seen_s: Dict[str, float] = {}
         self._streams: Dict[str, Tuple[Subscription, Pacer]] = {}
-        # The Hall range each glove was put on with set_hall_range, sent again
-        # when it comes back from silence; and the ones its pipeline is yet to
-        # be put on, which the glove's next packet does.
+        # The Hall range each glove was put on with set_hall_range (resend
+        # on), sent again when it comes back from silence; and the profile,
+        # with the ranges a Hall command put it on, that its raw messages and
+        # pipeline are yet to take, which the glove's next packet does.
         self._ranges: Dict[str, int] = {}
-        self._new_range: Dict[str, int] = {}
+        self._new_profile: Dict[str, Profile] = {}
         # Gloves whose pipeline has had every packet since it was built: the
         # ones a frames, debug or cancelled raw subscription has included since.
         self._fed: Set[str] = set()
@@ -327,22 +330,68 @@ class Local(Source):
                                        request.durations_ms or ()))
 
     def set_hall_range(self, device: str, hall_range: int,
-                       timeout: Optional[float] = None) -> str:
+                       timeout: Optional[float] = None, *, resend: bool = True) -> str:
         """As Client.set_hall_range. Every sensor gets the range with the
         other settings it powers up with, as the app sends them before the
         user has changed them; a sensor the profile has on a range of its own
         is on this one too from now on. The glove's pipeline takes the new
-        range from its next packet, and the glove is put on it again when it
-        comes back after going silent (it may have been switched off and on).
-        The profile file is not changed. Returns "": the words the app gives
-        are the app's; calibration(device).extrapolated says whether the
-        bounds are a rescale."""
+        range from its next packet. With *resend*, the glove is put on it
+        again when it comes back after going silent (it may have been
+        switched off and on); without, it is not, and a range remembered
+        before is forgotten. The profile file is not changed. Returns "":
+        the words the app gives are the app's; calibration(device).extrapolated
+        says whether the bounds are a rescale."""
         request = _judged(HallRange.from_message, HallRange(device, hall_range).to_message())
         self._connected(device)
         self._send(_hall_command(device, request.hall_range))
         with self._changed:
-            self._ranges[device] = self._new_range[device] = request.hall_range
+            self._new_profile[device] = replace(
+                self._next_profile(device), range=request.hall_range, sensor_ranges={})
+            if resend:
+                self._ranges[device] = request.hall_range
+            else:
+                self._ranges.pop(device, None)
         return ""
+
+    def send_hall_config(self, device: str, *, reset: bool = False,
+                         hall_range: int = HALL_DEFAULT_RANGE, osr: int = HALL_DEFAULT_OSR,
+                         odr: int = HALL_DEFAULT_ODR, filter: int = HALL_DEFAULT_FILTER,
+                         target: Union[int, str] = HALL_TARGET_ALL,
+                         timeout: Optional[float] = None) -> None:
+        """One Hall config command, exactly as given (what each setting is
+        is on Source). Nothing is sent again by itself afterwards, and a
+        range set_hall_range remembered for the glove is forgotten: a program
+        sending its own Hall settings sends them again itself, after the
+        glove went silent (a glove switched off and on is on its firmware's
+        defaults). The range the command puts the sensors on (the default
+        range after a reset) is what the glove's raw messages say and its
+        pipeline is rescaled to, from its next packet: the whole glove's for
+        every sensor, one sensor's range (raw sensor_ranges) for one."""
+        sensor = _hall_sensor(target)
+        if hall_range not in (HALL_RANGE_5MT, HALL_RANGE_50MT):
+            raise ServerError("bad_hall_range", f"hall_range is {hall_range!r}; it is 0 "
+                                                "(+-5 mT) or 1 (+-50 mT)")
+        for name, value, top in (("osr", osr, HALL_OSR_HIGH), ("odr", odr, len(HALL_ODR_HZ) - 1),
+                                 ("filter", filter, HALL_FILTER_MAX)):
+            if not isinstance(value, int) or not 0 <= value <= top:
+                raise ServerError("bad_hall_config", f"{name} is {value!r}; it is 0 to {top}")
+        self._connected(device)
+        self._send(commands.hall_config(device, reset=reset, range_val=hall_range, osr=osr,
+                                        odr=odr, filter_val=filter,
+                                        target=HALL_TARGET_ALL if sensor is None
+                                        else hall_target_id(sensor)))
+        now_on = HALL_DEFAULT_RANGE if reset else hall_range
+        with self._changed:
+            before = self._next_profile(device)
+            self._new_profile[device] = (
+                replace(before, range=now_on, sensor_ranges={}) if sensor is None
+                else replace(before, sensor_ranges={**before.sensor_ranges, sensor: now_on}))
+            self._ranges.pop(device, None)
+
+    def _next_profile(self, device: str) -> Profile:
+        """*device*'s profile with the Hall commands sent so far: the one
+        its next packet takes."""
+        return self._new_profile.get(device) or self._profiles[device]
 
     def _connected(self, device: str) -> None:
         """ServerError "unknown_device" unless *device* has sent lately, as
@@ -417,12 +466,11 @@ class Local(Source):
                 profile = self._profiles[device] = Profile(self._default_hand)
             # A glove with no profile of its own is read raw only.
             raw_only = device in self.unprofiled
-            if device in self._new_range:
-                # A new Glove on the new range, when one is next needed:
+            if device in self._new_profile:
+                # A new Glove on the new ranges, when one is next needed:
                 # building one is how the core puts a glove's calibration on
-                # the range its profile names.
-                profile = self._profiles[device] = replace(
-                    profile, range=self._new_range.pop(device), sensor_ranges={})
+                # the ranges its profile names.
+                profile = self._profiles[device] = self._new_profile.pop(device)
                 retired = self._gloves.pop(device, None)
                 self._fed.discard(device)
             # A hand is made only for a glove that a frames or debug
@@ -560,6 +608,25 @@ def _hall_command(device: str, hall_range: int) -> bytes:
     return commands.hall_config(device, reset=False, range_val=hall_range, osr=HALL_DEFAULT_OSR,
                                 odr=HALL_DEFAULT_ODR, filter_val=HALL_DEFAULT_FILTER,
                                 target=HALL_TARGET_ALL)
+
+
+# Hall config target id -> the sensor's key, as a profile's sensor_ranges
+# names it.
+_HALL_SENSORS = {hall_target_id(key): key for key in HALL_SENSOR_KEYS}
+
+
+def _hall_sensor(target: Union[int, str]) -> Optional[str]:
+    """The sensor key *target* names (a target id or a key), None for every
+    sensor; ServerError "bad_hall_config" for no sensor a glove has."""
+    if target == HALL_TARGET_ALL:
+        return None
+    if isinstance(target, str) and target in HALL_SENSOR_KEYS:
+        return target
+    if isinstance(target, int) and not isinstance(target, bool) and target in _HALL_SENSORS:
+        return _HALL_SENSORS[target]
+    raise ServerError("bad_hall_config",
+                      f"target is {target!r}; it is HALL_TARGET_ALL ({HALL_TARGET_ALL}), a "
+                      f"sensor's id ({sorted(_HALL_SENSORS)}) or its key ({list(HALL_SENSOR_KEYS)})")
 
 
 def _publish_debug(glove: Glove) -> None:

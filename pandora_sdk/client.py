@@ -19,12 +19,14 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple, Union
 
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect as _open_socket
 
 from pandora_core import protocol
+from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                        HALL_DEFAULT_RANGE, HALL_TARGET_ALL)
 from pandora_core.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
                                    ProtocolError, Subscription)
 
@@ -158,10 +160,25 @@ class Client(Source):
                       "haptics_sent", timeout, device=device)
 
     def set_hall_range(self, device: str, hall_range: int,
-                       timeout: Optional[float] = None) -> str:
+                       timeout: Optional[float] = None, *, resend: bool = True) -> str:
         reply = self._request(HallRange(device, hall_range).to_message(), "hall_range", timeout,
                               device=device)
         return str(reply.get("note", ""))
+
+    def send_hall_config(self, device: str, *, reset: bool = False,
+                         hall_range: int = HALL_DEFAULT_RANGE, osr: int = HALL_DEFAULT_OSR,
+                         odr: int = HALL_DEFAULT_ODR, filter: int = HALL_DEFAULT_FILTER,
+                         target: Union[int, str] = HALL_TARGET_ALL,
+                         timeout: Optional[float] = None) -> None:
+        """Refused: through the app, Hall settings beyond the range are the
+        app's (Debug > Hall Effect Firmware Settings), and the protocol has
+        no message for them. set_hall_range sends a range; open_receiver()
+        sends any Hall config, with the app closed."""
+        raise ServerError(
+            "not_supported",
+            "through the app, Hall settings beyond the range are the app's, and the protocol "
+            "has no message for them: use set_hall_range for the range, or close the app and "
+            "read the receiver with pandora_sdk.open_receiver() to send a full Hall config")
 
     # ── calibration bounds ───────────────────────────────────────────────
 

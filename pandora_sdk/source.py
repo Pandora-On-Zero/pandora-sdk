@@ -21,7 +21,8 @@ from typing import (Any, Callable, Deque, Dict, Iterator, List, Optional, Self, 
                     overload)
 
 from pandora_core import protocol
-from pandora_core.packet_layout import HAPTIC_MOTOR_COUNT
+from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                        HALL_DEFAULT_RANGE, HALL_TARGET_ALL, HAPTIC_MOTOR_COUNT)
 from pandora_core.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
 
 Message = Union[Frame, Raw, Debug]
@@ -291,11 +292,33 @@ class Source:
         self.play_rtp(device, [0] * HAPTIC_MOTOR_COUNT, [0] * HAPTIC_MOTOR_COUNT, timeout)
 
     def set_hall_range(self, device: str, hall_range: int,
-                       timeout: Optional[float] = None) -> str:
+                       timeout: Optional[float] = None, *, resend: bool = True) -> str:
         """Put every Hall sensor of *device* on *hall_range*: 0 is +-5 mT, 1
         is +-50 mT. Its calibration is rescaled to it, and its raw messages
         say it from then on. Returns what the change did to its calibration,
-        in words for a person ("" when there is nothing to say)."""
+        in words for a person ("" when there is nothing to say). *resend*
+        (without the app) is whether the range is sent again when the glove
+        comes back from silence; through the app the app sends its own
+        setting then, whatever *resend* says."""
+        raise NotImplementedError
+
+    def send_hall_config(self, device: str, *, reset: bool = False,
+                         hall_range: int = HALL_DEFAULT_RANGE, osr: int = HALL_DEFAULT_OSR,
+                         odr: int = HALL_DEFAULT_ODR, filter: int = HALL_DEFAULT_FILTER,
+                         target: Union[int, str] = HALL_TARGET_ALL,
+                         timeout: Optional[float] = None) -> None:
+        """Send one Hall config command exactly as given, without the app
+        only: *reset* (back to the firmware's defaults), *hall_range* (0
+        +-5 mT, 1 +-50 mT), *osr* (oversampling, 0 low, 1 high), *odr* (the
+        output rate, an index into pandora_core.packet_layout.HALL_ODR_HZ),
+        *filter* (0 to 7) and *target*, the sensor: HALL_TARGET_ALL (every
+        one), a target id, or a sensor key ("Index/Prox", "Thumb/Distal",
+        "Reference"; packet_layout.HALL_SENSOR_KEYS). The defaults are the
+        settings a glove powers up with, on every sensor. ServerError
+        "bad_hall_range" or "bad_hall_config" for a value the glove has no
+        setting for. Through the app, Hall settings beyond the range are the
+        app's and the protocol has no message for them: ServerError
+        "not_supported", and nothing is sent."""
         raise NotImplementedError
 
     # ── calibration bounds ───────────────────────────────────────────────
