@@ -2,11 +2,12 @@
 (tests/standin.py), so these also check pandora_core's decoding against
 PROTOCOL.md."""
 import threading
+from typing import Any, cast
 
 import msgpack
 import pytest
-from standin import (ABSENT, DEBUG, HALL_RANGE_NOTE, HELLO, RAW, StandIn, calibration, debug,
-                     frame, raw, wait)
+from standin import (ABSENT, CANCELLED, DEBUG, HALL_RANGE_NOTE, HELLO, RAW, StandIn, calibration,
+                     debug, frame, raw, raw_cancelled, wait)
 
 import pandora_sdk
 from pandora_sdk import Calibration, Device, Subscription
@@ -31,7 +32,7 @@ def test_what_the_app_said_in_its_hello_is_kept(gloves):
     assert gloves.server == pandora_sdk.Server(
         name="01glove-app", version="0.2.26", protocol=1,
         capabilities=("frames", "raw", "devices", "haptics", "hall_range", "calibration",
-                      "debug"))
+                      "debug", "raw_cancelled"))
 
 
 def test_an_app_on_another_protocol_version_is_refused_and_told():
@@ -341,6 +342,70 @@ def test_debug_messages_come_from_their_iterator_and_as_the_latest(app, gloves):
     assert next(gloves.debug()).seq == 1
     assert gloves.read().seq == 7
     assert gloves.latest("right", "debug").seq == 2
+
+
+# ── raw counts after earth-field cancellation ────────────────────────────────
+
+def test_a_raw_subscription_can_ask_for_the_cancelled_counts(app, gloves):
+    granted = gloves.subscribe("raw", cancelled=True)
+
+    assert app.of_type("subscribe") == [
+        {"type": "subscribe", "stream": "raw", "hands": ["left", "right"], "rate_hz": 0.0,
+         "cancelled": True}]
+    assert granted == Subscription("raw", cancelled=True)
+
+
+def test_a_raw_subscription_leaves_the_cancelled_counts_out_unless_asked(app, gloves):
+    assert gloves.subscribe("raw").cancelled is False
+    assert app.of_type("subscribe")[0]["cancelled"] is False
+
+
+def test_a_cancelled_that_is_not_true_or_false_is_refused_with_the_protocols_code(gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.subscribe("raw", cancelled=cast(Any, "yes"))
+
+    assert refused.value.code == "bad_cancelled"
+
+
+def test_an_app_without_the_cancelled_counts_grants_a_subscription_without_them(app, gloves):
+    """An app from before raw_cancelled ignores the field it does not know,
+    so what it granted says cancelled is off."""
+    app.replies["subscribe"] = [{"type": "subscribed", "stream": "raw",
+                                 "hands": ["left", "right"], "rate_hz": 0}]
+
+    assert gloves.subscribe("raw", cancelled=True).cancelled is False
+
+
+def test_a_raw_message_with_the_cancelled_counts_carries_them_beside_the_gloves(app, gloves):
+    app.send(raw_cancelled())
+
+    reading = gloves.read("raw")
+
+    assert reading.hall_cancelled is not None and len(reading.hall_cancelled) == 5
+    assert reading.hall_cancelled[0] == ((-1, 2, 3), (4, -5, 6))
+    assert reading.hall_cancelled[1] == ((7, 8, -9), (10, 11, 120))
+    assert (reading.thumb_distal_cancelled, reading.earth_cancelled) == ((31, -32, 33), True)
+    assert reading.hall[1] == ((7, 8, 9), (10, 11, 12))     # the glove's own, untouched
+
+
+def test_a_raw_message_with_nothing_cancelled_has_its_own_counts_twice(app, gloves):
+    app.send(raw_cancelled(hall_cancelled=RAW["hall"], thumb_distal_cancelled=None,
+                           thumb_distal=None, earth_cancelled=False))
+
+    reading = gloves.read("raw")
+
+    assert (reading.hall_cancelled, reading.earth_cancelled) == (reading.hall, False)
+    assert reading.thumb_distal_cancelled is None
+
+
+def test_a_raw_message_without_the_cancelled_counts_has_none(app, gloves):
+    app.send(raw())
+
+    reading = gloves.read("raw")
+
+    assert (reading.hall_cancelled, reading.thumb_distal_cancelled, reading.earth_cancelled) == (
+        None, None, None)
+    assert set(CANCELLED).isdisjoint(RAW)
 
 
 # ── a callback per message ───────────────────────────────────────────────────
