@@ -25,11 +25,15 @@ defaults=) are needed only then, so raw-only reading works without them. A
 pipeline that missed packets starts again as a new one at the next packet it
 is wanted for, so its smoothing begins there, as on a glove's first packet.
 
-Each glove needs a profile: its hand and the calibration it carries. `pandora
-calibrate` (pandora_sdk/calibrate.py) writes one, into default_profiles_dir()
-unless told otherwise, which is also where profiles are read from when none
-are named. Packets from a glove with none are left out, and its id is kept in
-`unprofiled`. Nothing is sent to a glove unless asked (set_hall_range, the
+A glove's frames need a profile: its hand and the calibration it carries.
+`pandora calibrate` (pandora_sdk/calibrate.py) writes one, into
+default_profiles_dir() unless told otherwise, which is also where profiles
+are read from when none are named. A glove with none is read raw only: its
+raw messages are passed on as the default hand's (default_hand, "right"
+unless told otherwise; the packet does not say), it takes commands, and it
+never gets a pipeline, so no frames, debug values or cancelled counts; its id
+is kept in `unprofiled`. With default_hand=None its packets are left out
+altogether. Nothing is sent to a glove unless asked (set_hall_range, the
 haptics), so a profile's calibration must have been taken at the range the
 glove powers up in, which is the range `pandora calibrate` puts it on, or the
 program puts the glove on the profile's range itself.
@@ -191,7 +195,8 @@ def link_failure_code(failed: OSError) -> str:
 
 def open_receiver(profiles: Optional[Profiles] = None, *, port: Optional[str] = None,
                   tuning: Union[Tuning, Mapping[str, Any], None] = None,
-                  defaults: Optional[Mapping[str, Any]] = None, buffer: int = 256) -> "Local":
+                  defaults: Optional[Mapping[str, Any]] = None, buffer: int = 256,
+                  default_hand: Optional[str] = "right") -> "Local":
     """Open the receiver on this computer and run the gloves' pipelines here.
 
     *profiles* is a folder of `<device id>.json` files, or a dict of device id
@@ -199,9 +204,12 @@ def open_receiver(profiles: Optional[Profiles] = None, *, port: Optional[str] = 
     calibrate` writes. *port* names the receiver's serial port when there is
     more than one. *tuning* is the pipeline's settings (pandora_core Tuning),
     *defaults* its shipped default files as parsed JSON by file name; left
-    out, pandora-core's own are used.
+    out, pandora-core's own are used, read when the first pipeline is built.
+    *default_hand* is the hand a glove with no profile is read as, raw only;
+    None leaves such a glove out.
     """
-    return Local(profiles, port=port, tuning=tuning, defaults=defaults, buffer=buffer)
+    return Local(profiles, port=port, tuning=tuning, defaults=defaults, buffer=buffer,
+                 default_hand=default_hand)
 
 
 class Local(Source):
@@ -214,8 +222,12 @@ class Local(Source):
                  tuning: Union[Tuning, Mapping[str, Any], None] = None,
                  defaults: Optional[Mapping[str, Any]] = None, buffer: int = 256,
                  link: Any = None, clock: Callable[[], float] = time.monotonic,
-                 wall_clock: Callable[[], float] = time.time) -> None:
+                 wall_clock: Callable[[], float] = time.time,
+                 default_hand: Optional[str] = "right") -> None:
         super().__init__(buffer)
+        if default_hand is not None and default_hand not in protocol.HANDS:
+            raise ValueError(f"default_hand is {default_hand!r}; it is 'left', 'right' or None")
+        self._default_hand = default_hand
         if profiles is None or isinstance(profiles, (str, Path)):
             self._profiles = load_profiles(
                 default_profiles_dir() if profiles is None else profiles)
@@ -249,7 +261,8 @@ class Local(Source):
         self._pipeline = threading.RLock()
         # One command written to the port at a time.
         self._writing = threading.Lock()
-        # Gloves heard that have no profile; their packets are left out.
+        # Gloves heard that have no profile: read raw only, as the default
+        # hand, or left out when there is none.
         self.unprofiled: Set[str] = set()
         # Tracking packets read so far, from any glove.
         self.packets = 0
@@ -262,7 +275,8 @@ class Local(Source):
     # ── the same requests as the app answers ─────────────────────────────
 
     def devices(self, timeout: Optional[float] = None) -> List[Device]:
-        """The gloves heard so far that have a profile, sending or not."""
+        """The gloves heard so far, sending or not: those with a profile,
+        and those read raw only as the default hand (unprofiled)."""
         now = self._clock()
         with self._changed:
             return [Device(device, self._profiles[device].hand, self._profiles[device].name,
@@ -336,7 +350,7 @@ class Local(Source):
         with self._changed:
             seen = self._seen_s.get(device)
         if seen is None or self._clock() - seen > SILENT_AFTER_S:
-            raise ServerError("unknown_device", f"no glove {device!r} with a profile is sending")
+            raise ServerError("unknown_device", f"no glove {device!r} is sending")
 
     def _send(self, payload: bytes) -> None:
         with self._writing:
@@ -358,8 +372,10 @@ class Local(Source):
         glove with no pipeline yet gets one, loaded with its newest packet."""
         with self._pipeline, self._changed:
             if device not in self._seen_s:
-                raise ServerError("unknown_device", f"no glove {device!r} with a profile has "
-                                                    "been heard")
+                raise ServerError("unknown_device", f"no glove {device!r} has been heard")
+            if device in self.unprofiled:
+                # No profile, so no calibration: as an uncalibrated glove's.
+                return Calibration(device, self._profiles[device].range, False, {})
             glove = self._gloves.get(device)
             if glove is None:
                 glove = self._gloves[device] = self._glove(self._profiles[device])
@@ -396,7 +412,11 @@ class Local(Source):
             profile = self._profiles.get(device)
             if profile is None:
                 self.unprofiled.add(device)
-                return
+                if self._default_hand is None:
+                    return
+                profile = self._profiles[device] = Profile(self._default_hand)
+            # A glove with no profile of its own is read raw only.
+            raw_only = device in self.unprofiled
             if device in self._new_range:
                 # A new Glove on the new range, when one is next needed:
                 # building one is how the core puts a glove's calibration on
@@ -410,9 +430,9 @@ class Local(Source):
             # that missed packets starts again as a new Glove, as on the
             # glove's first packet: its filters would otherwise pick up from
             # a packet long gone.
-            make_hand = any(wanted.wants(device, profile.hand)
-                            for stream, (wanted, _) in self._streams.items()
-                            if _runs_pipeline(stream, wanted))
+            make_hand = not raw_only and any(wanted.wants(device, profile.hand)
+                                             for stream, (wanted, _) in self._streams.items()
+                                             if _runs_pipeline(stream, wanted))
             glove = self._gloves.get(device)
             if make_hand and (glove is None or device not in self._fed):
                 if glove is not None:
@@ -444,7 +464,7 @@ class Local(Source):
         # straight from the packet (raw_from_packet is decode_raw of
         # encode_raw, without the msgpack round trip).
         raw = None
-        cancelled = "raw" in due and due["raw"].cancelled
+        cancelled = "raw" in due and due["raw"].cancelled and not raw_only
         if "raw" in due:
             # Before the pipeline, which changes the packet in place: hall is
             # what the glove sent.

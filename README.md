@@ -322,9 +322,25 @@ with pandora_sdk.open_receiver() as gloves:
 Only one program can hold the receiver. If the app is running, it has it: use
 `connect()`, or close the app.
 
-Each glove needs a **profile**: its hand and its calibration.
+A glove's hands need a **profile**: its hand and its calibration.
 [`pandora calibrate`](#calibrating-a-glove) writes one. A glove that sends but
-has no profile is left out, and `gloves.unprofiled` holds its id.
+has no profile is **read raw only**, and `gloves.unprofiled` holds its id:
+
+- Its raw readings are passed on, as the hand `default_hand` names: "right"
+  unless you say otherwise (`open_receiver(default_hand="left")`). A tracking
+  packet does not say which hand the glove is on, and a raw subscription by
+  hand includes such a glove only on that hand.
+- It takes commands (haptics, Hall settings) and is listed by `devices()`.
+- It never gets a pipeline: no frames, no debug values, and a raw
+  subscription with `cancelled=True` gives it plain readings (the cancelled
+  fields `None`). `calibration()` gives it no bounds.
+- `default_hand=None` leaves such a glove out altogether, as before.
+
+So a program that only wants raw readings needs no calibration at all. One
+that wants each glove's right hand without calibrating gives a bare profile,
+which needs no file either: `open_receiver({"NRF_GLOVE_E5D1":
+pandora_sdk.Profile("left")})`. Pass `{}` rather than nothing to read no
+profile folder at all.
 
 Profiles are files, one `<glove id>.json` per glove, in the folder
 `.pandora/profiles` in your home folder (`pandora_sdk.default_profiles_dir()`).
@@ -351,7 +367,7 @@ What is different without the app:
 | `calibration()` | The app's bounds | The bounds in the glove's profile, as its pipeline uses them; only gloves heard so far |
 | `latest_calibration()` | The newest the app sent | Read when asked, so never behind |
 | Debug values | Every stage the app runs | Every stage the glove's pipeline runs |
-| A command for a glove | Refused unless it is connected | Refused unless it has a profile and sent in the last two seconds |
+| A command for a glove | Refused unless it is connected | Refused unless it sent in the last two seconds |
 | Raw `hall` with gap fill on | A sensor that read all zeros carries the reading gap fill gave it | The glove's own zeros. Its cancelled counts are the filled reading, cancelled, as through the app |
 
 

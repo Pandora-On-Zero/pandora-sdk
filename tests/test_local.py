@@ -152,6 +152,86 @@ def test_a_glove_with_no_profile_is_left_out_and_named(link, gloves):
     assert gloves.unprofiled == {STRANGER}
 
 
+# ── raw only for a glove with no profile ─────────────────────────────────────
+
+def test_a_glove_with_no_profile_has_its_raw_readings_passed_on_as_a_right_hand(link, gloves):
+    gloves.subscribe("raw")
+
+    link.feed(packet_line(STRANGER, glove_ms=77))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert (reading.device, reading.hand, reading.seq, reading.glove_ms) == (
+        STRANGER, "right", 1, 77)
+    assert reading.hall[1][0] == (112, 113, 114)
+    assert gloves.unprofiled == {STRANGER}
+
+
+def test_the_hand_a_glove_with_no_profile_is_read_as_can_be_chosen(link, clock):
+    with pandora_sdk.Local({}, link=link, defaults={}, clock=clock,
+                           default_hand="left") as gloves:
+        gloves.subscribe("raw", hands=["left"])
+        link.feed(packet_line(STRANGER))
+
+        assert gloves.read("raw", timeout=2.0).hand == "left"
+
+
+def test_with_no_default_hand_a_glove_with_no_profile_is_left_out_of_raw_too(link, clock):
+    with pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock,
+                           default_hand=None) as gloves:
+        gloves.subscribe("raw")
+        link.feed(packet_line(STRANGER), packet_line(RIGHT))
+
+        assert gloves.read("raw", timeout=2.0).device == RIGHT
+        assert gloves.unprofiled == {STRANGER}
+        assert [device.id for device in gloves.devices()] == [RIGHT]
+
+
+def test_a_default_hand_that_is_no_hand_is_refused(link):
+    with pytest.raises(ValueError, match="default_hand"):
+        pandora_sdk.Local({}, link=link, default_hand="both")
+
+
+def test_a_glove_with_no_profile_gets_no_pipeline_whatever_is_asked_for(link, gloves, pushes):
+    gloves.subscribe(bones=False)
+    gloves.subscribe("debug")
+    gloves.subscribe("raw", cancelled=True)
+
+    feed(link, gloves, packet_line(STRANGER), packet_line(STRANGER))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert reading.device == STRANGER
+    assert (reading.hall_cancelled, reading.earth_cancelled) == (None, None)
+    assert pushes == []
+    assert gloves.latest(STRANGER) is None and gloves.latest(STRANGER, "debug") is None
+
+
+def test_a_glove_with_no_profile_is_listed_with_the_default_hand(link, gloves):
+    feed(link, gloves, packet_line(STRANGER))
+
+    assert gloves.devices() == [Device(STRANGER, "right", "", True)]
+
+
+def test_a_glove_with_no_profile_takes_commands(link, gloves):
+    feed(link, gloves, packet_line(STRANGER))
+
+    gloves.stop(STRANGER)
+
+    assert sent(link, GLOVE_PKT_HAPTIC_RTP, USB_HAPTIC_RTP_FORMAT) == [
+        (GLOVE_PKT_HAPTIC_RTP, STRANGER.encode().ljust(16, b"\0"), *([0] * 12))]
+
+
+def test_a_glove_with_no_profile_has_no_calibration_and_needs_no_pipeline_for_it(
+        link, no_default_files, pushes):
+    with pandora_sdk.Local({}, link=link) as gloves:
+        feed(link, gloves, packet_line(STRANGER))
+
+        bounds = gloves.calibration(STRANGER)
+
+    assert (bounds.device, bounds.hall_range, bounds.extrapolated, bounds.calibrations) == (
+        STRANGER, None, False, {})
+    assert pushes == []
+
+
 def test_devices_lists_the_gloves_heard_with_hand_name_and_whether_they_still_send(
         link, gloves, clock):
     link.feed(packet_line(RIGHT))
