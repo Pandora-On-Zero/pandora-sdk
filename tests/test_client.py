@@ -5,10 +5,13 @@ import threading
 
 import msgpack
 import pytest
-from standin import HELLO, RAW, StandIn, frame, raw, wait
+from standin import (ABSENT, DEBUG, HALL_RANGE_NOTE, HELLO, RAW, StandIn, calibration, debug,
+                     frame, raw, wait)
 
 import pandora_sdk
-from pandora_sdk import Device, Subscription
+from pandora_sdk import Calibration, Device, Subscription
+
+RIGHT, LEFT = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D"
 
 
 @pytest.fixture
@@ -27,7 +30,8 @@ def test_the_client_says_hello_with_its_name(app):
 def test_what_the_app_said_in_its_hello_is_kept(gloves):
     assert gloves.server == pandora_sdk.Server(
         name="01glove-app", version="0.2.26", protocol=1,
-        capabilities=("frames", "raw", "devices"))
+        capabilities=("frames", "raw", "devices", "haptics", "hall_range", "calibration",
+                      "debug"))
 
 
 def test_an_app_on_another_protocol_version_is_refused_and_told():
@@ -178,3 +182,162 @@ def test_closing_the_client_ends_iteration_without_an_error(gloves):
     threading.Timer(0.1, gloves.close).start()
 
     assert list(gloves.frames()) == []
+
+
+# ── wall time ────────────────────────────────────────────────────────────────
+
+def test_frames_and_raw_messages_carry_the_apps_wall_time(app, gloves):
+    app.send(frame(), raw())
+
+    assert gloves.read().wall_time_us == 1_762_000_000_000_000
+    assert gloves.read("raw").wall_time_us == 1_762_000_000_000_000
+
+
+def test_from_an_app_that_sends_no_wall_time_it_is_none(app, gloves):
+    app.send(frame(wall_time_us=ABSENT), raw(wall_time_us=ABSENT))
+
+    assert gloves.read().wall_time_us is None
+    assert gloves.read("raw").wall_time_us is None
+
+
+# ── commands for a glove ─────────────────────────────────────────────────────
+
+def test_play_rom_sends_one_effect_per_motor_and_returns_once_the_app_passed_it_on(
+        app, gloves):
+    gloves.play_rom(RIGHT, [0, 0, 47, 0, 0, 0])
+
+    assert app.of_type("haptics") == [
+        {"type": "haptics", "device": RIGHT, "effects": [0, 0, 47, 0, 0, 0]}]
+
+
+def test_play_rtp_sends_an_amplitude_and_a_duration_per_motor(app, gloves):
+    gloves.play_rtp(RIGHT, [0, 90, 90, 0, 0, 0], [300] * 6)
+
+    assert app.of_type("haptics") == [
+        {"type": "haptics", "device": RIGHT, "amplitudes": [0, 90, 90, 0, 0, 0],
+         "durations_ms": [300, 300, 300, 300, 300, 300]}]
+
+
+def test_stop_sends_the_all_zero_frame_that_stops_every_motor_at_once(app, gloves):
+    gloves.stop(RIGHT)
+
+    assert app.of_type("haptics") == [
+        {"type": "haptics", "device": RIGHT, "amplitudes": [0] * 6, "durations_ms": [0] * 6}]
+
+
+def test_a_command_for_a_glove_that_is_not_connected_is_refused_with_the_protocols_code(
+        gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.play_rom(LEFT, [1, 0, 0, 0, 0, 0])
+
+    assert refused.value.code == "unknown_device"
+
+
+def test_haptics_the_spec_does_not_allow_are_refused_by_the_app(gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.play_rom(RIGHT, [200, 0, 0, 0, 0, 0])
+
+    assert refused.value.code == "bad_haptics"
+
+
+def test_a_command_the_app_could_not_send_raises_send_failed(app, gloves):
+    """What the app answers with no receiver linked."""
+    app.replies["haptics"] = [
+        {"type": "error", "code": "send_failed", "message": f"could not send to {RIGHT}"}]
+
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.stop(RIGHT)
+
+    assert refused.value.code == "send_failed"
+
+
+def test_set_hall_range_sends_the_range_and_returns_what_it_did_to_the_calibration(
+        app, gloves):
+    note = gloves.set_hall_range(RIGHT, 1)
+
+    assert app.of_type("set_hall_range") == [
+        {"type": "set_hall_range", "device": RIGHT, "hall_range": 1}]
+    assert note == HALL_RANGE_NOTE
+
+
+def test_a_hall_range_that_is_neither_5_nor_50_mt_is_refused(gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.set_hall_range(RIGHT, 2)
+
+    assert refused.value.code == "bad_hall_range"
+
+
+def test_a_reply_for_another_glove_is_not_taken_for_this_ones(app, gloves):
+    app.replies["haptics"] = [{"type": "haptics_sent", "device": LEFT}]
+
+    with pytest.raises(TimeoutError):
+        gloves.play_rom(RIGHT, [1, 0, 0, 0, 0, 0], timeout=0.2)
+
+
+# ── calibration ──────────────────────────────────────────────────────────────
+
+SPEC_BOUNDS = {"Index": {"prox_min": (-812.0, 140.0, 2210.0), "prox_max": (35.0, -12.0, 4020.0),
+                         "meta_min": (410.0, -96.0, 1388.0), "meta_max": (12.0, 8.0, 2950.0)}}
+
+
+def test_calibration_of_a_glove_is_its_bounds_as_the_app_has_them(app, gloves):
+    assert gloves.calibration(RIGHT) == Calibration(RIGHT, 0, False, SPEC_BOUNDS)
+    assert app.of_type("calibration") == [{"type": "calibration", "device": RIGHT}]
+
+
+def test_calibration_with_no_glove_named_is_every_glove_in_the_device_list(gloves):
+    assert gloves.calibration() == {RIGHT: Calibration(RIGHT, 0, False, SPEC_BOUNDS),
+                                    LEFT: Calibration(LEFT, 0, False, SPEC_BOUNDS)}
+
+
+def test_calibration_of_a_glove_the_app_has_not_seen_is_refused(gloves):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        gloves.calibration("NRF_GLOVE_NOPE")
+
+    assert refused.value.code == "unknown_device"
+
+
+def test_bounds_the_app_pushes_when_they_change_are_kept_as_the_latest(app, gloves):
+    assert gloves.latest_calibration(RIGHT) is None
+
+    app.send(calibration(hall_range=1, extrapolated=True))
+    assert wait(lambda: gloves.latest_calibration(RIGHT) is not None)
+
+    latest = gloves.latest_calibration(RIGHT)
+    assert latest is not None and (latest.hall_range, latest.extrapolated) == (1, True)
+    assert gloves.latest_calibration(LEFT) is None
+
+
+def test_bounds_asked_for_are_the_latest_too(gloves):
+    gloves.calibration(RIGHT)
+
+    assert gloves.latest_calibration(RIGHT) == Calibration(RIGHT, 0, False, SPEC_BOUNDS)
+
+
+# ── the debug stream ─────────────────────────────────────────────────────────
+
+def test_a_debug_subscription_names_the_values_wanted(app, gloves):
+    granted = gloves.subscribe("debug", keys=["mag.*", "curl.Index.?rox"])
+
+    assert app.of_type("subscribe") == [
+        {"type": "subscribe", "stream": "debug", "hands": ["left", "right"], "rate_hz": 0.0,
+         "keys": ["mag.*", "curl.Index.?rox"]}]
+    assert granted == Subscription("debug", keys=("mag.*", "curl.Index.?rox"))
+
+
+def test_a_debug_message_written_from_the_spec_is_read_as_its_values(app, gloves):
+    app.send(debug())
+
+    values = gloves.read("debug")
+
+    assert (values.device, values.hand, values.seq, values.time_us, values.wall_time_us) == (
+        RIGHT, "right", 41, 5_000_000, 1_762_000_000_000_000)
+    assert values.values == DEBUG["values"]
+
+
+def test_debug_messages_come_from_their_iterator_and_as_the_latest(app, gloves):
+    app.send(debug(seq=1), debug(seq=2), frame(seq=7))
+
+    assert next(gloves.debug()).seq == 1
+    assert gloves.read().seq == 7
+    assert gloves.latest("right", "debug").seq == 2

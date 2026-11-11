@@ -7,8 +7,9 @@
         for hand in gloves.frames():
             print(hand.angles_deg)
 
-The messages are pandora_core.protocol's; this file only opens the socket and
-sorts what arrives. One background thread reads the socket; keeping and
+The messages are pandora_core.protocol's; this file only opens the socket,
+sends requests (subscriptions, commands for a glove, calibration) and sorts
+what arrives. One background thread reads the socket; keeping and
 handing out the messages is Source's (pandora_sdk/source.py), shared with the
 receiver read without the app (pandora_sdk/local.py).
 """
@@ -24,13 +25,18 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect as _open_socket
 
 from pandora_core import protocol
-from pandora_core.protocol import DEFAULT_PORT, Device, ProtocolError, Subscription
+from pandora_core.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
+                                   ProtocolError, Subscription)
 
 from pandora_sdk.source import (ConnectionFailed, Disconnected, PandoraError, ServerError,
                                 Source)
 
 __all__ = ["Client", "ConnectionFailed", "Disconnected", "PandoraError", "Server",
            "ServerError", "connect"]
+
+# The text messages that answer a request. "devices" and "calibration" are
+# also sent unasked, when they change.
+REPLIES = ("devices", "subscribed", "error", "haptics_sent", "hall_range", "calibration")
 
 
 @dataclass(frozen=True)
@@ -73,8 +79,10 @@ class Client(Source):
                 "Protocol switched on (Settings > General > Advanced > Protocol)?") from None
         self.server = self._exchange_hellos(url, name)
 
-        # Answers to requests, oldest first: devices, subscribed and error.
+        # Answers to requests, oldest first (REPLIES).
         self._replies: Deque[Dict[str, Any]] = deque()
+        # Per glove, the newest calibration message, asked for or pushed.
+        self._calibrations: Dict[str, Calibration] = {}
         # One request at a time: an error carries no word on what it answers.
         self._requesting = threading.Lock()
         self._reader = threading.Thread(target=self._read_socket, name="pandora-sdk-reader",
@@ -113,25 +121,61 @@ class Client(Source):
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
-                  bones: bool = True, timeout: Optional[float] = None) -> Subscription:
-        """Ask for a stream: "frames" (finished hands) or "raw" (what the
-        glove sent). Returns what the app granted.
+                  bones: bool = True, keys: Sequence[str] = ("*",),
+                  timeout: Optional[float] = None) -> Subscription:
+        """Ask for a stream: "frames" (finished hands), "raw" (what the
+        glove sent) or "debug" (values from inside the pipeline). Returns
+        what the app granted.
 
         *devices* are glove ids, None for every glove; *hands* narrows by
         hand. *rate_hz* is messages a second per glove at most, 0 for every
         one. *bones* (frames only) is whether each frame carries the 31-bone
-        skeleton, which is most of its size. Asking again for the same stream
-        replaces the earlier subscription.
+        skeleton, which is most of its size. *keys* (debug only) are glob
+        patterns over the value names to send. Asking again for the same
+        stream replaces the earlier subscription.
         """
         wanted = Subscription(stream, None if devices is None else tuple(devices), tuple(hands),
-                              float(rate_hz), bones)
-        reply = self._request(wanted.to_message(), "subscribed", timeout, stream)
+                              float(rate_hz), bones, tuple(keys))
+        reply = self._request(wanted.to_message(), "subscribed", timeout, stream=stream)
         return Subscription.from_message(reply)
 
+    # ── commands for a glove (what each does is on Source) ───────────────
+
+    def play_rom(self, device: str, effects: Sequence[int],
+                 timeout: Optional[float] = None) -> None:
+        self._request(Haptics(device, effects=tuple(effects)).to_message(), "haptics_sent",
+                      timeout, device=device)
+
+    def play_rtp(self, device: str, amplitudes: Sequence[int], durations_ms: Sequence[int],
+                 timeout: Optional[float] = None) -> None:
+        self._request(Haptics(device, amplitudes=tuple(amplitudes),
+                              durations_ms=tuple(durations_ms)).to_message(),
+                      "haptics_sent", timeout, device=device)
+
+    def set_hall_range(self, device: str, hall_range: int,
+                       timeout: Optional[float] = None) -> str:
+        reply = self._request(HallRange(device, hall_range).to_message(), "hall_range", timeout,
+                              device=device)
+        return str(reply.get("note", ""))
+
+    # ── calibration bounds ───────────────────────────────────────────────
+
+    def latest_calibration(self, device: str) -> Optional[Calibration]:
+        """The newest bounds the app sent for *device*, asked for or pushed
+        when they changed; None before the first."""
+        with self._changed:
+            return self._calibrations.get(device)
+
+    def _calibration_of(self, device: str, timeout: Optional[float]) -> Calibration:
+        reply = self._request({"type": "calibration", "device": device}, "calibration", timeout,
+                              device=device)
+        return protocol.parse_calibration(reply)
+
     def _request(self, message: Dict[str, Any], answer: str, timeout: Optional[float],
-                 stream: Optional[str] = None) -> Dict[str, Any]:
-        """Send *message* and return the app's *answer* message; ServerError
-        when it answers with an error instead."""
+                 **match: Any) -> Dict[str, Any]:
+        """Send *message* and return the app's *answer* message whose keys
+        hold the values in *match* (the stream, the device); ServerError when
+        it answers with an error instead."""
         timeout = self._timeout if timeout is None else timeout
         with self._requesting:
             with self._changed:
@@ -148,7 +192,8 @@ class Client(Source):
                         if reply["type"] == "error":
                             raise ServerError(str(reply.get("code", "")),
                                               str(reply.get("message", "")))
-                        if reply["type"] == answer and stream in (None, reply.get("stream")):
+                        if reply["type"] == answer and all(
+                                reply.get(key) == value for key, value in match.items()):
                             return reply
                     if self._closed or self._ended:
                         raise Disconnected(self._why_ended())
@@ -179,10 +224,19 @@ class Client(Source):
         except ProtocolError:
             return
         # Anything else is a message this version does not know: ignored.
-        if message["type"] in ("devices", "subscribed", "error"):
-            with self._changed:
-                self._replies.append(message)
-                self._changed.notify_all()
+        if message["type"] not in REPLIES:
+            return
+        calibration = None
+        if message["type"] == "calibration":
+            try:
+                calibration = protocol.parse_calibration(message)
+            except ProtocolError:
+                return
+        with self._changed:
+            if calibration is not None:
+                self._calibrations[calibration.device] = calibration
+            self._replies.append(message)
+            self._changed.notify_all()
 
     def _on_binary(self, data: bytes) -> None:
         kind = protocol.kind_of(data)
@@ -191,6 +245,8 @@ class Client(Source):
                 self._deliver("frames", protocol.decode_frame(data))
             elif kind == "raw":
                 self._deliver("raw", protocol.decode_raw(data))
+            elif kind == "debug":
+                self._deliver("debug", protocol.decode_debug(data))
         except ProtocolError:
             return
 
