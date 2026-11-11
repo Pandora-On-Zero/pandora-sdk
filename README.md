@@ -727,6 +727,29 @@ whose version matches, so without the raise a program whose pin moved keeps
 running the old library without saying so. A change that only touches the
 tests or this README needs none.
 
+### Branches
+
+Every change goes on a short-lived branch off `main`, one change per branch, merged by a
+pull request and then deleted. The prefix says what kind of change it is, and the pull
+request gets the matching label automatically (`.github/labeler.yml`):
+
+| Branch | For | Merges into |
+| --- | --- | --- |
+| `feat/<topic>` (or `feature/`) | a new feature or behaviour | `main` |
+| `fix/<topic>` | a bug fix | `main` |
+| `docs/<topic>` | documentation only | `main` |
+| `release/<name>` | keeping a shipped version alive while `main` moves on | stays |
+| `hotfix/<topic>` | an urgent fix to a version already shipped | its `release/` branch |
+
+Other work may use any other `<prefix>/<topic>`; it just gets no label. The `main` ruleset
+also covers `release/**`: pull request and code-owner review, no force-push, no deletion.
+
+A hotfix is for a version programs already depend on that cannot wait for the next one.
+While `main` holds nothing unreleased it is just a `fix/` branch. Otherwise create
+`release/<x.y>` from that version's commit or tag, branch `hotfix/<topic>` from it, merge
+the fix there by pull request, bump the patch version, and bring the same fix to `main`
+with a second pull request (`git cherry-pick`).
+
 ## Not here yet
 
 - Any of it tried on a real glove: the haptics and Hall commands,
