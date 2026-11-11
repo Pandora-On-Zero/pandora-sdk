@@ -1,0 +1,13 @@
+# Labels a pull request by the prefix of its branch name (actions/labeler,
+# run by .github/workflows/label-pr.yml). The branch types are described in
+# the README, "Branches".
+feature:
+  - head-branch: ['^feat/', '^feature/']
+fix:
+  - head-branch: ['^fix/']
+docs:
+  - head-branch: ['^docs/']
+release:
+  - head-branch: ['^release/']
+hotfix:
+  - head-branch: ['^hotfix/']

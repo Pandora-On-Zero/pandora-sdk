@@ -1,0 +1,20 @@
+name: Label PR
+
+# Adds the feature / fix / docs / release / hotfix label from the branch name,
+# using the rules in .github/labeler.yml. pull_request_target runs this file
+# and labeler.yml as they are on the base branch and never checks out the
+# pull request's code, so it may label pull requests from forks too.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v5
