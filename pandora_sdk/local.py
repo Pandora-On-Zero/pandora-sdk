@@ -18,8 +18,10 @@ are written to the same port.
 A glove's pipeline runs only while a frames or debug subscription includes
 it, or a raw one with cancelled (the counts after earth-field cancellation
 exist only once the pipeline has had the packet); with plain raw alone, its
-packets make the raw message and nothing else. Its first packet still goes
-through a pipeline, which loads the profile that calibration() reads. A
+packets make the raw message and nothing else, and no pipeline is built at
+all until calibration() asks for one, which loads the glove's profile with
+its newest packet. The pipeline's default files (pandora-core's own, or
+defaults=) are needed only then, so raw-only reading works without them. A
 pipeline that missed packets starts again as a new one at the next packet it
 is wanted for, so its smoothing begins there, as on a glove's first packet.
 
@@ -214,12 +216,6 @@ class Local(Source):
                  link: Any = None, clock: Callable[[], float] = time.monotonic,
                  wall_clock: Callable[[], float] = time.time) -> None:
         super().__init__(buffer)
-        if defaults is None and not shipped_defaults():
-            raise PandoraError(
-                "this pandora-core carries none of its default files (hall_reference.default.json, "
-                "ic_overrides.default.json, bone_pose_overrides.json), and hands made without "
-                "them are wrong. Reinstall pandora-sdk, or pass them as defaults=, parsed, by "
-                "file name.")
         if profiles is None or isinstance(profiles, (str, Path)):
             self._profiles = load_profiles(
                 default_profiles_dir() if profiles is None else profiles)
@@ -230,7 +226,12 @@ class Local(Source):
         self._tuning, self._defaults = tuning, defaults
         self._clock, self._wall_clock = clock, wall_clock
         self._decoder = PacketDecoder()
+        # Each glove's pipeline, built only when one is needed: for a frames,
+        # debug or cancelled raw subscription, or for calibration().
         self._gloves: Dict[str, Glove] = {}
+        # Each glove's newest packet, which a pipeline built for
+        # calibration() loads the glove's profile with.
+        self._last: Dict[str, GlovePacket] = {}
         self._seq: Dict[str, int] = {}
         self._seen_s: Dict[str, float] = {}
         self._streams: Dict[str, Tuple[Subscription, Pacer]] = {}
@@ -264,9 +265,9 @@ class Local(Source):
         """The gloves heard so far that have a profile, sending or not."""
         now = self._clock()
         with self._changed:
-            return [Device(device, glove.hand, glove.profile.name,
-                           now - self._seen_s[device] <= SILENT_AFTER_S)
-                    for device, glove in sorted(self._gloves.items())]
+            return [Device(device, self._profiles[device].hand, self._profiles[device].name,
+                           now - seen <= SILENT_AFTER_S)
+                    for device, seen in sorted(self._seen_s.items())]
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
@@ -280,6 +281,8 @@ class Local(Source):
         asked = Subscription(stream, None if devices is None else tuple(devices), tuple(hands),
                              rate_hz, bones, tuple(keys), cancelled)
         granted = _judged(Subscription.from_message, asked.to_message())
+        if _runs_pipeline(granted.stream, granted):
+            self._require_defaults()
         with self._changed:
             self._streams[granted.stream] = (granted, Pacer(granted.rate_hz))
             if granted.stream == "debug":
@@ -331,7 +334,7 @@ class Local(Source):
         """ServerError "unknown_device" unless *device* has sent lately, as
         the app judges a command."""
         with self._changed:
-            seen = self._seen_s.get(device) if device in self._gloves else None
+            seen = self._seen_s.get(device)
         if seen is None or self._clock() - seen > SILENT_AFTER_S:
             raise ServerError("unknown_device", f"no glove {device!r} with a profile is sending")
 
@@ -351,12 +354,16 @@ class Local(Source):
             return None
 
     def _calibration_of(self, device: str, timeout: Optional[float]) -> Calibration:
-        """From the glove's own stores, as the app's server reads them."""
+        """From the glove's own stores, as the app's server reads them. A
+        glove with no pipeline yet gets one, loaded with its newest packet."""
         with self._pipeline, self._changed:
-            glove = self._gloves.get(device)
-            if glove is None:
+            if device not in self._seen_s:
                 raise ServerError("unknown_device", f"no glove {device!r} with a profile has "
                                                     "been heard")
+            glove = self._gloves.get(device)
+            if glove is None:
+                glove = self._gloves[device] = self._glove(self._profiles[device])
+                glove.push_decoded(self._last[device])
             with glove.stores():
                 bounds = active_bounds(device)
         return protocol.parse_calibration(protocol.calibration_message(device, bounds))
@@ -386,33 +393,30 @@ class Local(Source):
         retired: Optional[Glove] = None
         with self._changed:
             self.packets += 1
-            glove = self._gloves.get(device)
-            if glove is None:
-                found = self._profiles.get(device)
-                if found is None:
-                    self.unprofiled.add(device)
-                    return
-                profile = found
-            elif device in self._new_range:
-                # A new Glove on the new range: building one is how the core
-                # puts a glove's calibration on the range its profile names.
-                retired = glove
+            profile = self._profiles.get(device)
+            if profile is None:
+                self.unprofiled.add(device)
+                return
+            if device in self._new_range:
+                # A new Glove on the new range, when one is next needed:
+                # building one is how the core puts a glove's calibration on
+                # the range its profile names.
                 profile = self._profiles[device] = replace(
-                    glove.profile, range=self._new_range.pop(device), sensor_ranges={})
-            else:
-                profile = glove.profile
+                    profile, range=self._new_range.pop(device), sensor_ranges={})
+                retired = self._gloves.pop(device, None)
+                self._fed.discard(device)
             # A hand is made only for a glove that a frames or debug
             # subscription includes, or a raw one with cancelled. A pipeline
             # that missed packets starts again as a new Glove, as on the
             # glove's first packet: its filters would otherwise pick up from
             # a packet long gone.
             make_hand = any(wanted.wants(device, profile.hand)
-                        for stream, (wanted, _) in self._streams.items()
-                        if _runs_pipeline(stream, wanted))
-            fresh = (glove is None or retired is not None
-                     or (make_hand and device not in self._fed))
-            if glove is None or fresh:
-                retired = retired or glove
+                            for stream, (wanted, _) in self._streams.items()
+                            if _runs_pipeline(stream, wanted))
+            glove = self._gloves.get(device)
+            if make_hand and (glove is None or device not in self._fed):
+                if glove is not None:
+                    retired = glove
                 glove = self._gloves[device] = self._glove(profile)
             if make_hand:
                 self._fed.add(device)
@@ -423,8 +427,9 @@ class Local(Source):
             resend = self._ranges.get(device) if back else None
             seq = self._seq[device] = self._seq.get(device, 0) + 1
             self._seen_s[device] = now
+            self._last[device] = packet
             due = {stream: wanted for stream, (wanted, pacer) in self._streams.items()
-                   if wanted.wants(device, glove.hand) and pacer.due(device, now)}
+                   if wanted.wants(device, profile.hand) and pacer.due(device, now)}
         if retired is not None:
             retired.close()
         if resend is not None:
@@ -442,28 +447,22 @@ class Local(Source):
             # Before the pipeline, which changes the packet in place: hall is
             # what the glove sent.
             raw = protocol.decode_raw(protocol.encode_raw(
-                packet, glove.hand, seq, time_us, glove.hall_range, glove.sensor_ranges,
+                packet, profile.hand, seq, time_us, profile.range, profile.sensor_ranges,
                 wall_time_us))
-        frame = None
-        if fresh:
-            # A new Glove's first packet loads its profile into its stores,
-            # which calibration() reads: before a callback can ask for it.
-            frame = glove.push_decoded(packet)
         if raw is not None and not cancelled:
             self._deliver("raw", raw)
-        if not make_hand:
+        if not make_hand or glove is None:
             return
         # From here every packet goes through the pipeline, wanted now or
         # not: its filters carry state from one to the next.
-        if frame is None:
-            frame = glove.push_decoded(packet)
+        frame = glove.push_decoded(packet)
         if raw is not None and cancelled:
             # The counts the pipeline normalised exist only now, after gap
             # fill and earth-field cancellation changed the packet: read by
             # the core's encode_raw, as the app's server reads them. The
             # rest of the message stays the one made before.
             after = protocol.decode_raw(protocol.encode_raw(
-                packet, glove.hand, seq, time_us, glove.hall_range, glove.sensor_ranges,
+                packet, profile.hand, seq, time_us, profile.range, profile.sensor_ranges,
                 wall_time_us, cancelled=True))
             self._deliver("raw", replace(
                 raw, hall_cancelled=after.hall_cancelled,
@@ -476,12 +475,29 @@ class Local(Source):
             with glove.stores():
                 values = get_debug_tap().values_of(device, due["debug"].keys)
             self._deliver("debug", protocol.decode_debug(protocol.encode_debug(
-                device, glove.hand, seq, time_us, values, wall_time_us)))
+                device, profile.hand, seq, time_us, values, wall_time_us)))
+
+    def _require_defaults(self) -> Mapping[str, Any]:
+        """The pipeline's default files: those given, or pandora-core's,
+        read when the first pipeline is wanted. PandoraError when there are
+        none, rather than hands made wrong without them."""
+        if self._defaults is None:
+            found = shipped_defaults()
+            if not found:
+                raise PandoraError(
+                    "this pandora-core carries none of its default files "
+                    "(hall_reference.default.json, ic_overrides.default.json, "
+                    "bone_pose_overrides.json), and hands made without them are wrong. Raw "
+                    "readings need none of them. Reinstall pandora-sdk (a frozen program: "
+                    "bundle pandora_core's data files), or pass them as defaults=, parsed, by "
+                    "file name.")
+            self._defaults = found
+        return self._defaults
 
     def _glove(self, profile: Profile) -> Glove:
         """A pipeline for *profile*, publishing its debug values when they
         are subscribed to."""
-        glove = Glove(profile, self._tuning, self._defaults)
+        glove = Glove(profile, self._tuning, self._require_defaults())
         if "debug" in self._streams:
             _publish_debug(glove)
         return glove

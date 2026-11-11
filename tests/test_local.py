@@ -397,13 +397,38 @@ def test_a_closed_source_has_ended(link, clock):
     assert opened.end_error is not None and opened.end_error.code == "closed"
 
 
-def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypatch):
-    """A pandora-core from before it carried them; hands made without them
-    would be wrong, silently."""
+@pytest.fixture
+def no_default_files(monkeypatch):
+    """A pandora-core that carries none of the pipeline's default files (an
+    old one, or a frozen program built without them); hands made without
+    them would be wrong, silently."""
     monkeypatch.setattr("pandora_sdk.local.shipped_defaults", lambda: {})
 
-    with pytest.raises(pandora_sdk.PandoraError, match="default files"):
-        pandora_sdk.Local(PROFILES, link=link)
+
+def test_without_the_pipelines_default_files_raw_readings_still_come(link, no_default_files):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        gloves.subscribe("raw")
+        link.feed(packet_line(RIGHT), packet_line(LEFT))
+
+        assert {gloves.read("raw", timeout=2.0).device for _ in range(2)} == {RIGHT, LEFT}
+
+
+@pytest.mark.parametrize("subscription", [{"stream": "frames"}, {"stream": "debug"},
+                                          {"stream": "raw", "cancelled": True}],
+                         ids=["frames", "debug", "raw-cancelled"])
+def test_without_the_pipelines_default_files_a_stream_that_needs_it_is_refused(
+        link, no_default_files, subscription):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
+            gloves.subscribe(**subscription)
+
+
+def test_without_the_pipelines_default_files_calibration_is_refused(link, no_default_files):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        feed(link, gloves, packet_line(RIGHT))
+
+        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
+            gloves.calibration(RIGHT)
 
 
 # ── wall time ────────────────────────────────────────────────────────────────
@@ -629,14 +654,14 @@ def feed(link, gloves, *lines):
 @pytest.mark.parametrize("streams", [(), ("raw",)])
 def test_with_neither_frames_nor_debug_asked_for_a_glove_skips_the_pipeline(
         link, gloves, pushes, streams):
-    """Only its first packet goes through: that loads the glove's profile,
-    which calibration() reads."""
+    """Not even its first packet: its pipeline is built only when one is
+    needed (calibration() builds one when asked)."""
     for stream in streams:
         gloves.subscribe(stream)
 
     feed(link, gloves, *(packet_line(RIGHT, glove_ms=ms) for ms in range(1, 6)))
 
-    assert [ms for _, _, ms in pushes] == [1]
+    assert pushes == []
 
 
 def test_a_glove_no_frames_subscription_includes_skips_the_pipeline(link, gloves, pushes):
@@ -645,7 +670,7 @@ def test_a_glove_no_frames_subscription_includes_skips_the_pipeline(link, gloves
     feed(link, gloves, *(packet_line(device, glove_ms=ms)
                          for ms in range(1, 4) for device in (LEFT, RIGHT)))
 
-    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+    assert [ms for _, device, ms in pushes if device == LEFT] == []
     assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3]
 
 
@@ -661,8 +686,20 @@ def test_frames_asked_for_late_come_from_a_new_pipeline_started_at_that_packet(
 
     assert gloves.read(timeout=2.0).seq == 4
     pipeline = {ms: glove for glove, _, ms in pushes}
-    assert sorted(pipeline) == [1, 4, 5]
-    assert pipeline[4] is not pipeline[1] and pipeline[5] is pipeline[4]
+    assert sorted(pipeline) == [4, 5]
+    assert pipeline[5] is pipeline[4]
+
+
+def test_calibration_of_a_raw_only_glove_builds_its_pipeline_when_asked(link, clock, pushes):
+    with pandora_sdk.Local(CALIBRATED, link=link, defaults={}, clock=clock) as gloves:
+        gloves.subscribe("raw")
+        feed(link, gloves, packet_line(RIGHT, glove_ms=1), packet_line(RIGHT, glove_ms=2))
+        assert pushes == []
+
+        bounds = gloves.calibration(RIGHT)
+
+    assert bounds.calibrations["Index"]["prox_min"] == (-800.0, 140.0, 2200.0)
+    assert [ms for _, _, ms in pushes] == [2]
 
 
 # ── raw counts after earth-field cancellation ────────────────────────────────
@@ -711,7 +748,7 @@ def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, g
                          for ms in range(1, 6) for device in (LEFT, RIGHT)))
 
     assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3, 4, 5]
-    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+    assert [ms for _, device, ms in pushes if device == LEFT] == []
 
 
 # A real glove with earth-field cancellation on: tests/data/right_earth.json,

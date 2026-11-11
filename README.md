@@ -380,9 +380,16 @@ microseconds a packet on the PC this was written on, against 0.6 to 1.9
 milliseconds with the pipeline. A frames subscription narrowed to one hand or
 one glove leaves the others raw only.
 
-- `calibration()`, `latest_calibration()` and `set_hall_range` work as
-  ever: a glove's first packet, and its first after a range change, still go
-  through a pipeline, which loads its profile and its range.
+- No pipeline is built for a raw-only glove at all, not even for its first
+  packet. `calibration()` and `latest_calibration()` build one when asked,
+  loading the glove's profile (and its range) with its newest packet, a
+  millisecond or a few once; `set_hall_range` works as ever.
+- The pipeline's default files (`hall_reference.default.json` and the others
+  `pandora-core` ships, or `defaults=`) are read only when the first pipeline
+  is wanted. Without them, raw-only reading works; subscribing to frames,
+  debug or cancelled raw, or asking for `calibration()`, raises
+  `PandoraError` instead of making wrong hands. A frozen program (PyInstaller)
+  that only reads raw needs no `--collect-data pandora_core`.
 - **Subscribing to frames (or to raw with `cancelled`) later starts that
   glove's pipeline afresh at the next packet**, as when the glove is switched
   on: its smoothing and other filters, earth-field cancellation's among them,
