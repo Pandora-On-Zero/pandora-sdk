@@ -54,10 +54,11 @@ Without it pip may keep the `pandora-core` it already has, even with
 commit it came from, and keeps one whose version is the one asked for. That is
 why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
-This version needs `pandora-core` 0.3.0 (commit `661b64c`), which added
-[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)
-to raw readings. An install that has 0.2.0 moves to it with the
-`--force-reinstall` above.
+This version needs `pandora-core` 0.4.0 (commit `56b63dd`), which added the
+battery voltage and two power flags to raw readings (0.3.0 had added
+[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)).
+An install that has an older core moves to it with the `--force-reinstall`
+above.
 
 ## Before you connect
 
@@ -146,6 +147,16 @@ for reading in gloves.raw():
 
 A raw reading has the same `device`, `hand`, `seq`, `time_us` and
 `wall_time_us` as a frame, and `hall_range`, the range its counts are in.
+Besides the Hall counts it carries the glove's own state:
+
+| Field | Meaning |
+| --- | --- |
+| `battery_pct`, `charging` | Charge left, 0 to 100, and whether it is charging |
+| `battery_mv` | The battery's voltage in millivolts; 0 when the glove could not read it |
+| `usb_power` | Whether the glove sees USB power, charging or not |
+| `gatt_commands` | Whether the glove takes commands on its GATT command characteristic; `False` from glove firmware older than that |
+
+An app older than these three sends none of them: each is then `None`.
 
 #### Counts after earth-field cancellation
 
@@ -375,9 +386,10 @@ glove sends 200 a second.
 A glove's pipeline runs only while a `frames` or `debug` subscription includes
 it, or a `raw` one with `cancelled=True`, whose counts exist only once the
 pipeline has had the packet. With none of these (only plain `raw`, or nothing
-yet), each packet makes the raw message and nothing else: about 30
-microseconds a packet on the PC this was written on, against 0.6 to 1.9
-milliseconds with the pipeline. A frames subscription narrowed to one hand or
+yet), each packet makes the raw message and nothing else: about 5
+microseconds of handling a packet on the PC this was written on (median over
+recorded packets, not counting reading the port and splitting the frames),
+against 0.6 to 1.9 milliseconds with the pipeline. A frames subscription narrowed to one hand or
 one glove leaves the others raw only.
 
 - No pipeline is built for a raw-only glove at all, not even for its first
@@ -591,12 +603,12 @@ commit you pin must carry a higher `pandora-core` version** (its
 `pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
 installed core whose version matches, whatever commit it came from, so a pin
 to a new commit with the same version leaves people on the old core. The pin
-is at 0.3.0 now (`661b64c`). Then install again with
+is at 0.4.0 now (`56b63dd`). Then install again with
 `pip install --force-reinstall -e ".[dev]"`, or, to replace only the core:
 
 ```bash
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
-  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@661b64c0aa914ecad881fe7c92e7ca0d4b1f6620#subdirectory=pandora-core"
+  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@56b63ddb0e1ba323c291aa39f18a812b82f02083#subdirectory=pandora-core"
 ```
 
 ## Not here yet

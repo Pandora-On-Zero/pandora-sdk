@@ -6,8 +6,8 @@ from typing import Any, cast
 
 import msgpack
 import pytest
-from standin import (ABSENT, CANCELLED, DEBUG, HALL_RANGE_NOTE, HELLO, RAW, StandIn, calibration,
-                     debug, frame, raw, raw_cancelled, wait)
+from standin import (ABSENT, CANCELLED, DEBUG, HALL_RANGE_NOTE, HELLO, RAW, RAW_POWER_KEYS,
+                     StandIn, calibration, debug, frame, raw, raw_cancelled, wait)
 
 import pandora_sdk
 from pandora_sdk import Calibration, Device, Subscription
@@ -162,7 +162,17 @@ def test_raw_messages_are_read_on_their_own_stream(app, gloves):
     assert reading.finger_imu_deg == (None, (4.0, 5.0, 6.0), None, None, None)
     assert (reading.buttons, reading.joystick) == (RAW["buttons"], (100, -200))
     assert (reading.battery_pct, reading.charging) == (87, False)
+    assert (reading.battery_mv, reading.usb_power, reading.gatt_commands) == (3987, True, True)
     assert gloves.read().seq == 42
+
+
+def test_a_raw_message_from_an_older_app_has_no_battery_voltage_or_power_flags(app, gloves):
+    app.send(raw(**{key: ABSENT for key in RAW_POWER_KEYS}))
+
+    reading = gloves.read("raw")
+
+    assert (reading.battery_mv, reading.usb_power, reading.gatt_commands) == (None, None, None)
+    assert reading.battery_pct == 87
 
 
 def test_latest_is_the_newest_frame_of_a_hand_or_of_a_device(app, gloves):

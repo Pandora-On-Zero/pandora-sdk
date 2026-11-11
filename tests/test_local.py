@@ -140,6 +140,7 @@ def test_the_raw_stream_carries_the_gloves_own_readings(link, gloves):
         RIGHT, "right", 1, 4321)
     assert reading.hall[1][0] == (112, 113, 114)
     assert (reading.reference, reading.battery_pct) == ((7, 8, 9), 87)
+    assert (reading.battery_mv, reading.usb_power, reading.gatt_commands) == (4000, False, False)
 
 
 def test_a_glove_with_no_profile_is_left_out_and_named(link, gloves):

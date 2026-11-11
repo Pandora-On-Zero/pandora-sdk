@@ -51,7 +51,11 @@ RAW: Dict[str, Any] = {
     "finger_imu_deg": [None, [4.0, 5.0, 6.0], None, None, None],
     "buttons": {"trigger": False, "a": True, "b": False, "system": False, "power": False,
                 "stick": False},
-    "joystick": [100, -200], "battery_pct": 87, "charging": False}
+    "joystick": [100, -200], "battery_pct": 87, "charging": False,
+    "battery_mv": 3987, "usb_power": True, "gatt_commands": True}
+
+# The raw keys an older server does not send (the spec: none of them, then).
+RAW_POWER_KEYS = ("battery_mv", "usb_power", "gatt_commands")
 
 # The keys a raw message also carries when the subscription said cancelled,
 # from the spec's second raw table: per finger the counts after earth-field
