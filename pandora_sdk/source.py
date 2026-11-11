@@ -20,10 +20,10 @@ from collections import deque
 from typing import (Any, Callable, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union,
                     overload)
 
-from pandora_core import protocol
-from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
-                                        HALL_DEFAULT_RANGE, HALL_TARGET_ALL, HAPTIC_MOTOR_COUNT)
-from pandora_core.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
+from pandora_core_rs import protocol
+from pandora_core_rs.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                           HALL_DEFAULT_RANGE, HALL_TARGET_ALL, HAPTIC_MOTOR_COUNT)
+from pandora_core_rs.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
 
 Message = Union[Frame, Raw, Debug]
 
@@ -32,7 +32,7 @@ _log = logging.getLogger("pandora_sdk")
 
 class PandoraError(Exception):
     """What this package raises itself. A message the protocol does not allow
-    is pandora_core's ProtocolError; a wait that ran out is TimeoutError."""
+    is pandora_core_rs's ProtocolError; a wait that ran out is TimeoutError."""
 
 
 class ConnectionFailed(PandoraError):
@@ -310,7 +310,7 @@ class Source:
         """Send one Hall config command exactly as given, without the app
         only: *reset* (back to the firmware's defaults), *hall_range* (0
         +-5 mT, 1 +-50 mT), *osr* (oversampling, 0 low, 1 high), *odr* (the
-        output rate, an index into pandora_core.packet_layout.HALL_ODR_HZ),
+        output rate, an index into pandora_core_rs.packet_layout.HALL_ODR_HZ),
         *filter* (0 to 7) and *target*, the sensor: HALL_TARGET_ALL (every
         one), a target id, or a sensor key ("Index/Prox", "Thumb/Distal",
         "Reference"; packet_layout.HALL_SENSOR_KEYS). The defaults are the

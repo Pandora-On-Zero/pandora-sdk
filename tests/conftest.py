@@ -24,7 +24,7 @@ def no_real_receiver(monkeypatch) -> None:
     """No test finds or opens a real serial port: the receiver plugged into
     this computer, and the glove behind it, stay out of reach. A test that
     wants a port patches these with a made-up one (tests/fakelink.py)."""
-    from pandora_core import receiver
+    from pandora_core_rs import receiver
 
     def _refused(port, *_args, **_kwargs):
         raise AssertionError(f"a test tried to open the real port {port}")

@@ -1,7 +1,7 @@
 """`pandora calibrate` (pandora_sdk/calibrate.py) against a made-up receiver.
 The glove here is a script: every Hall sensor at one level while the hand is
 open and at another once it is a fist. What a calibration makes of real
-readings is pandora-core's own tests' business; these check what the command
+readings is pandora-core-rs's own tests' business; these check what the command
 adds: picking the glove, what it says, what it sends, and the file it leaves."""
 import json
 from types import SimpleNamespace
@@ -11,8 +11,8 @@ import pytest
 from fakelink import Link, packet_line, sent
 
 import pandora_sdk
-from pandora_core.calibration_session import Step, StepKind
-from pandora_core.packet_layout import (
+from pandora_core_rs.calibration_session import Step, StepKind
+from pandora_core_rs.packet_layout import (
     GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_RANGE, HALL_TARGET_ALL,
     HAPTIC_MOTOR_COUNT, USB_HALL_CONFIG_FORMAT, USB_HAPTIC_RTP_FORMAT,
 )

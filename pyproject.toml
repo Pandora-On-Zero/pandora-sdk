@@ -4,21 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandora-sdk"
-version = "0.2.2"
+version = "0.3.0"
 description = "Hands from the 01 Glove app in a few lines of Python"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # The message format is pandora-core's, not a copy of it. Pinned to a
-    # commit of the private Pandora repo; see README, "Installing". The core's
-    # base install is only its wire layer: `pipeline` brings numpy for the hand
-    # pipeline (Glove, calibration), `serial` brings pyserial for the receiver.
-    "pandora-core[pipeline,serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@9cd9df028d833058c8c6a455f1de11b273279413#subdirectory=pandora-core",
+    # The message format and the pipeline are pandora-core-rs's (the Rust core's
+    # Python binding), not a copy of them: one prebuilt wheel per platform from a
+    # Pandora-Release release; see README, "Installing".
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.1.0/pandora_core_rs-0.1.0-cp311-abi3-win_amd64.whl ; sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.1.0/pandora_core_rs-0.1.0-cp311-abi3-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.1.0/pandora_core_rs-0.1.0-cp311-abi3-manylinux_2_28_aarch64.whl ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.1.0/pandora_core_rs-0.1.0-cp311-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl ; sys_platform == 'darwin'",
+    # The receiver's port (pandora_core_rs.receiver).
+    "pyserial>=3.5",
     "websockets>=13",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# msgpack: tests/standin.py decodes the binary messages on its own.
+dev = ["pytest>=8", "msgpack>=1.0"]
 
 [project.scripts]
 pandora = "pandora_sdk.cli:main"

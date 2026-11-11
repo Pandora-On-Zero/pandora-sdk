@@ -11,7 +11,7 @@ The same reading as connect() gives (subscribe, frames, raw, debug, read,
 latest, on, devices), the same Frame, Raw and Debug, and the same commands for a
 glove (play_rom, play_rtp, stop, set_hall_range) and calibration bounds, so a
 program can change between the two by changing one line. Here the pipeline
-(pandora-core) runs in this process: one thread reads the receiver's port and
+(pandora-core-rs) runs in this process: one thread reads the receiver's port and
 pushes each glove's packets through that glove's own pipeline, and commands
 are written to the same port.
 
@@ -20,8 +20,8 @@ it, or a raw one with cancelled (the counts after earth-field cancellation
 exist only once the pipeline has had the packet); with plain raw alone, its
 packets make the raw message and nothing else, and no pipeline is built at
 all until calibration() asks for one, which loads the glove's profile with
-its newest packet. The pipeline's default files (pandora-core's own, or
-defaults=) are needed only then, so raw-only reading works without them. A
+its newest packet. The pipeline's default files (pandora-core-rs's own, or
+defaults=) are parsed only then. A
 pipeline that missed packets starts again as a new one at the next packet it
 is wanted for, so its smoothing begins there, as on a glove's first packet.
 
@@ -50,23 +50,21 @@ from pathlib import Path
 from typing import (Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple,
                     Union)
 
-from pandora_core import commands, protocol, receiver
-from pandora_core.calibration_storage import active_bounds
-from pandora_core.debug_tap import get_debug_tap
-from pandora_core.glove import Glove, Profile
-from pandora_core.packet_decoder import GlovePacket, PacketDecoder
-from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
-                                        HALL_DEFAULT_RANGE, HALL_FILTER_MAX, HALL_ODR_HZ,
-                                        HALL_OSR_HIGH, HALL_RANGE_5MT, HALL_RANGE_50MT,
-                                        HALL_SENSOR_KEYS, HALL_TARGET_ALL, hall_target_id)
-from pandora_core.protocol import (Calibration, Device, HallRange, Haptics, Pacer, ProtocolError,
-                                   Subscription)
-from pandora_core.receiver import ReceiverPort
-from pandora_core.scope import shipped_defaults
-from pandora_core.serial_framing import decode_frame, encode_frame, is_binary_frame
-from pandora_core.tuning import Tuning
+from pandora_core_rs import commands, protocol, receiver
+from pandora_core_rs.glove import Glove, Profile
+from pandora_core_rs.packet_decoder import GlovePacket, PacketDecoder
+from pandora_core_rs.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                           HALL_DEFAULT_RANGE, HALL_FILTER_MAX, HALL_ODR_HZ,
+                                           HALL_OSR_HIGH, HALL_RANGE_5MT, HALL_RANGE_50MT,
+                                           HALL_SENSOR_KEYS, HALL_TARGET_ALL, hall_target_id)
+from pandora_core_rs.protocol import (Calibration, Device, HallRange, Haptics, Pacer, ProtocolError,
+                                      Subscription)
+from pandora_core_rs.receiver import ReceiverPort
+from pandora_core_rs.scope import shipped_defaults
+from pandora_core_rs.serial_framing import decode_frame, encode_frame, is_binary_frame
+from pandora_core_rs.tuning import Tuning
 
-from pandora_sdk.source import CallbackFailed, ConnectionFailed, PandoraError, ServerError, Source
+from pandora_sdk.source import CallbackFailed, ConnectionFailed, ServerError, Source
 
 # A glove with no packet for this long is listed as not connected, as the
 # protocol's device list says, and takes no commands.
@@ -89,7 +87,7 @@ def default_profiles_dir() -> Path:
 
 def load_profiles(folder: Union[str, Path]) -> Dict[str, Profile]:
     """The profiles in *folder*: one `<device id>.json` per glove, each the
-    JSON form of a pandora_core Profile (hand, sections, range, ...). None
+    JSON form of a pandora_core_rs Profile (hand, sections, range, ...). None
     when there is no such folder."""
     return {path.stem: Profile.from_dict(json.loads(path.read_text(encoding="utf-8")))
             for path in sorted(Path(folder).glob("*.json"))}
@@ -155,7 +153,7 @@ def open_link(port: Optional[str] = None, *, timeout: float = 0.2,
 
 
 def send_command(link: Any, payload: bytes) -> None:
-    """Write one command for a glove (pandora_core.commands' bytes) to the
+    """Write one command for a glove (pandora_core_rs.commands' bytes) to the
     receiver on *link*, framed. ServerError "send_failed" when the port will
     not take it."""
     try:
@@ -191,7 +189,7 @@ def link_packets(link: Any, decoder: Optional[PacketDecoder] = None,
 
 def is_damaged_frame(line: bytes) -> bool:
     """Whether a line that held no packet is a binary frame that failed its
-    COBS or CRC check (pandora_core.serial_framing's decode_frame)."""
+    COBS or CRC check (pandora_core_rs.serial_framing's decode_frame)."""
     return is_binary_frame(line) and decode_frame(line) is None
 
 
@@ -230,9 +228,9 @@ def open_receiver(profiles: Optional[Profiles] = None, *, port: Optional[str] = 
     *profiles* is a folder of `<device id>.json` files, or a dict of device id
     to profile; left out, it is default_profiles_dir(), where `pandora
     calibrate` writes. *port* names the receiver's serial port when there is
-    more than one. *tuning* is the pipeline's settings (pandora_core Tuning),
+    more than one. *tuning* is the pipeline's settings (pandora_core_rs Tuning),
     *defaults* its shipped default files as parsed JSON by file name; left
-    out, pandora-core's own are used, read when the first pipeline is built.
+    out, pandora-core-rs's own are used, read when the first pipeline is built.
     *default_hand* is the hand a glove with no profile is read as, raw only;
     None leaves such a glove out.
     """
@@ -459,8 +457,7 @@ class Local(Source):
             if glove is None:
                 glove = self._gloves[device] = self._glove(self._profiles[device])
                 glove.push_decoded(self._last[device])
-            with glove.stores():
-                bounds = active_bounds(device)
+            bounds = glove.active_bounds(device)
         return protocol.parse_calibration(protocol.calibration_message(device, bounds))
 
     # ── the receiver ─────────────────────────────────────────────────────
@@ -604,26 +601,15 @@ class Local(Source):
             self._deliver("frames", protocol.decode_frame(protocol.encode_frame(
                 frame, seq, time_us, due["frames"].bones, wall_time_us)))
         if "debug" in due:
-            with glove.stores():
-                values = get_debug_tap().values_of(device, due["debug"].keys)
+            values = glove.debug_values(list(due["debug"].keys))
             self._deliver("debug", protocol.decode_debug(protocol.encode_debug(
                 device, profile.hand, seq, time_us, values, wall_time_us)))
 
     def _require_defaults(self) -> Mapping[str, Any]:
-        """The pipeline's default files: those given, or pandora-core's,
-        read when the first pipeline is wanted. PandoraError when there are
-        none, rather than hands made wrong without them."""
+        """The pipeline's default files: those given, or pandora-core-rs's
+        (compiled into it), parsed when the first pipeline is wanted."""
         if self._defaults is None:
-            found = shipped_defaults()
-            if not found:
-                raise PandoraError(
-                    "this pandora-core carries none of its default files "
-                    "(hall_reference.default.json, ic_overrides.default.json, "
-                    "bone_pose_overrides.json), and hands made without them are wrong. Raw "
-                    "readings need none of them. Reinstall pandora-sdk (a frozen program: "
-                    "bundle pandora_core's data files), or pass them as defaults=, parsed, by "
-                    "file name.")
-            self._defaults = found
+            self._defaults = shipped_defaults()
         return self._defaults
 
     def _glove(self, profile: Profile) -> Glove:
@@ -693,5 +679,4 @@ def _hall_sensor(target: Union[int, str]) -> Optional[str]:
 def _publish_debug(glove: Glove) -> None:
     """Have *glove*'s pipeline publish its named values (its own debug tap,
     one per glove)."""
-    with glove.stores():
-        get_debug_tap().want(glove)
+    glove.debug_want("pandora-sdk", True)

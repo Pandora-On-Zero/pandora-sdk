@@ -1,8 +1,8 @@
 """`pandora update-firmware` (pandora_sdk/firmware.py) against a made-up
 receiver that answers the DFU protocol as the receiver's and the glove's
-firmware do (the answers pandora-core's own firmware tests give). No real
+firmware do (the answers pandora-core-rs's own firmware tests give). No real
 port is opened and nothing is flashed: what is checked is what the command
-adds around the core's update, which pandora-core's tests check line by
+adds around the core's update, which pandora-core-rs's tests check line by
 line: picking the target, the question, refusing a held receiver, and the
 outcome."""
 import struct
@@ -13,8 +13,8 @@ from typing import List
 import pytest
 from fakelink import Link, packet_line
 
-from pandora_core import receiver
-from pandora_core.firmware_update import FirmwareUpdater
+from pandora_core_rs import receiver
+from pandora_core_rs.firmware_update import FirmwareUpdater
 from pandora_sdk import firmware
 from pandora_sdk.cli import main
 

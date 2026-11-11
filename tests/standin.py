@@ -1,6 +1,6 @@
 """A stand-in for the app's protocol server, written from PROTOCOL.md alone.
 
-It imports nothing of pandora_core on purpose: the client decodes with that
+It imports nothing of pandora_core_rs on purpose: the client decodes with that
 package, so a server that encoded with it too could not catch a mistake the
 package makes on both sides. The messages below are typed out from the spec,
 and requests are checked against its tables as the spec says the server
