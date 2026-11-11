@@ -16,7 +16,7 @@ with pandora_sdk.connect() as gloves:
 
 **Status:** version 0.1, private. It reads hands, raw readings and the
 pipeline's debug values, through a running app or straight from the receiver
-with no app. It sends haptics and a Hall range to a glove, gives each glove's
+with no app. It sends haptics and Hall settings to a glove, gives each glove's
 calibration bounds, calibrates a glove with no app (`pandora calibrate`) and
 updates firmware (`pandora update-firmware`). None of the sending, the
 calibrating or the firmware update has been tried on a real glove yet: they
@@ -54,10 +54,11 @@ Without it pip may keep the `pandora-core` it already has, even with
 commit it came from, and keeps one whose version is the one asked for. That is
 why a move of the pin normally raises the core's version (see
 [Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
-This version needs `pandora-core` 0.3.0 (commit `661b64c`), which added
-[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)
-to raw readings. An install that has 0.2.0 moves to it with the
-`--force-reinstall` above.
+This version needs `pandora-core` 0.4.0 (commit `56b63dd`), which added the
+battery voltage and two power flags to raw readings (0.3.0 had added
+[the counts after earth-field cancellation](#counts-after-earth-field-cancellation)).
+An install that has an older core moves to it with the `--force-reinstall`
+above.
 
 ## Before you connect
 
@@ -146,6 +147,16 @@ for reading in gloves.raw():
 
 A raw reading has the same `device`, `hand`, `seq`, `time_us` and
 `wall_time_us` as a frame, and `hall_range`, the range its counts are in.
+Besides the Hall counts it carries the glove's own state:
+
+| Field | Meaning |
+| --- | --- |
+| `battery_pct`, `charging` | Charge left, 0 to 100, and whether it is charging |
+| `battery_mv` | The battery's voltage in millivolts; 0 when the glove could not read it |
+| `usb_power` | Whether the glove sees USB power, charging or not |
+| `gatt_commands` | Whether the glove takes commands on its GATT command characteristic; `False` from glove firmware older than that |
+
+An app older than these three sends none of them: each is then `None`.
 
 #### Counts after earth-field cancellation
 
@@ -212,6 +223,23 @@ with pandora_sdk.open_receiver() as gloves:
   `Disconnected` saying what your function raised.
 - It works the same through the app (`connect()`) and without it.
 
+A program that takes everything through callbacks never reads, so a read
+cannot tell it that the source has ended. Ask instead:
+
+```python
+while not gloves.wait_ended(0.5):        # True once it has ended; False after the wait
+    update_status()
+error = gloves.end_error                 # the Disconnected a read would raise now
+if error.code == "unplugged":
+    ...
+```
+
+| | |
+| --- | --- |
+| `gloves.ended` | Whether the source has ended (closed, or lost), without waiting |
+| `gloves.wait_ended(timeout)` | Waits up to `timeout` seconds (`None` for ever) for the end; whether it came |
+| `gloves.end_error` | Why it ended, as a `Disconnected` with its [code](#when-things-go-wrong); `None` while it runs |
+
 With `open_receiver()` and only `raw` subscribed, as here, no hand is made at
 all: see [Raw only](#raw-only).
 
@@ -276,13 +304,56 @@ app, its own haptic settings still apply: which motors may run and the
 wearer's strength. A Hall range set this way does not change the app's own
 setting, which goes back to the glove when it next connects.
 
+#### The full Hall config (without the app)
+
+`set_hall_range` puts every sensor on a range with the other settings they
+power up with. Without the app, `send_hall_config` sends one Hall command
+exactly as you give it:
+
+```python
+gloves.send_hall_config(glove, reset=True)                       # back to the firmware's defaults
+gloves.send_hall_config(glove, hall_range=1, odr=6, filter=2)    # every sensor: +-50 mT, 700 Hz
+gloves.send_hall_config(glove, hall_range=1, target="Index/Prox")    # one sensor
+```
+
+| Argument | Default (what a glove powers up with) | Meaning |
+| --- | --- | --- |
+| `reset` | `False` | Back to the firmware's defaults |
+| `hall_range` | `0` | `0` is +-5 mT, `1` is +-50 mT |
+| `osr` | `1` | Oversampling: `0` low, `1` high |
+| `odr` | `4` (200 Hz) | Output rate, an index into `pandora_core.packet_layout.HALL_ODR_HZ` (10, 15, 50, 100, 200, 500, 700, 1000, 1400 Hz) |
+| `filter` | `3` | Filtering, `0` (least) to `7` (most) |
+| `target` | every sensor (`0xFF`) | One sensor, by its id or its key: `"Thumb/Prox"`, `"Thumb/Meta"`, `"Thumb/Distal"`, `"Index/Prox"`, `"Index/Meta"`, the same for `Middle`, `Ring` and `Pinky`, or `"Reference"` |
+
+- A value the glove has no setting for raises `ServerError` with
+  `bad_hall_range` or `bad_hall_config`, and nothing is sent; a glove that
+  has not sent in the last two seconds, `unknown_device`.
+- The range it puts the sensors on (the default range after a reset) is
+  what the glove's raw readings say (`hall_range`, or `sensor_ranges` for one
+  sensor) and what its calibration is rescaled to, from its next packet.
+- **Nothing is sent again by itself.** `set_hall_range` sends its range again
+  when the glove comes back after two seconds of silence (it may have been
+  switched off and on, which puts it back on its defaults);
+  `send_hall_config` does not, and forgets a range `set_hall_range`
+  remembered for that glove. A program that sends its own Hall settings
+  sends them again itself. `set_hall_range(glove, range, resend=False)` sends
+  a range that is not sent again either, and forgets the one remembered.
+- **Through the app it is refused**: `ServerError` with code `not_supported`,
+  and nothing is sent. Hall settings beyond the range are the app's (Debug >
+  Hall Effect Firmware Settings), and the protocol has no message for them.
+  Through the app `resend` changes nothing: the app sends its own setting
+  when the glove next connects, never this range.
+
 ### Without the app
 
 `open_receiver()` reads the receiver itself and runs each glove's pipeline in
 your process. Everything after that line is the same as with `connect()`:
 `subscribe`, `frames`, `raw`, `debug`, `read`, `latest`, `on`, `devices`,
-`calibration`, `latest_calibration`, the commands for a glove, and the same
-frames.
+`calibration`, `latest_calibration`, the commands for a glove, `ended`,
+`wait_ended`, `end_error`, and the same frames. Only here: the
+[full Hall config](#the-full-hall-config-without-the-app) (`send_hall_config`),
+[the receiver's text lines and damaged frames](#the-receivers-own-lines-and-damaged-frames)
+(`on_line`, `bad_frames`), and gloves with no profile read raw only.
 
 ```python
 with pandora_sdk.open_receiver() as gloves:
@@ -294,9 +365,25 @@ with pandora_sdk.open_receiver() as gloves:
 Only one program can hold the receiver. If the app is running, it has it: use
 `connect()`, or close the app.
 
-Each glove needs a **profile**: its hand and its calibration.
+A glove's frames need a **profile**: its hand and its calibration.
 [`pandora calibrate`](#calibrating-a-glove) writes one. A glove that sends but
-has no profile is left out, and `gloves.unprofiled` holds its id.
+has no profile is **read raw only**, and `gloves.unprofiled` holds its id:
+
+- Its raw readings are passed on, as the hand `default_hand` names: "right"
+  unless you say otherwise (`open_receiver(default_hand="left")`). A tracking
+  packet does not say which hand the glove is on, and a raw subscription by
+  hand includes such a glove only on that hand.
+- It takes commands (haptics, Hall settings) and is listed by `devices()`.
+- It never gets a pipeline: no frames, no debug values, and a raw
+  subscription with `cancelled=True` gives it plain readings (the cancelled
+  fields `None`). `calibration()` gives it no bounds.
+- `default_hand=None` leaves such a glove out altogether, as before.
+
+So a program that only wants raw readings needs no calibration at all. One
+that wants a glove's raw readings on its true hand, without calibrating,
+gives a bare profile, which needs no file either: `open_receiver({"NRF_GLOVE_E5D1":
+pandora_sdk.Profile("left")})`. Pass `{}` rather than nothing to read no
+profile folder at all.
 
 Profiles are files, one `<glove id>.json` per glove, in the folder
 `.pandora/profiles` in your home folder (`pandora_sdk.default_profiles_dir()`).
@@ -319,13 +406,62 @@ What is different without the app:
 | | Through the app | Without the app |
 | --- | --- | --- |
 | Haptics | The app's haptic settings apply (which motors, the wearer's strength) | Sent exactly as given |
-| `set_hall_range` | The app's other Hall settings and per-sensor tuning go with it; returns the app's note | Sent with the settings the sensors power up with, to every sensor (a sensor the profile had on its own range is on the new one too); returns `""`. Its pipeline takes the range from the glove's next packet, and the range is sent again when the glove comes back after two seconds of silence (it may have been switched off and on). The profile file is not changed |
+| `set_hall_range` | The app's other Hall settings and per-sensor tuning go with it; returns the app's note | Sent with the settings the sensors power up with, to every sensor (a sensor the profile had on its own range is on the new one too); returns `""`. Its pipeline takes the range from the glove's next packet, and the range is sent again when the glove comes back after two seconds of silence (it may have been switched off and on), unless `resend=False`. The profile file is not changed |
+| `send_hall_config` | Refused (`not_supported`) | Sent exactly as given; never sent again by itself ([above](#the-full-hall-config-without-the-app)) |
 | `calibration()` | The app's bounds | The bounds in the glove's profile, as its pipeline uses them; only gloves heard so far |
 | `latest_calibration()` | The newest the app sent | Read when asked, so never behind |
 | Debug values | Every stage the app runs | Every stage the glove's pipeline runs |
-| A command for a glove | Refused unless it is connected | Refused unless it has a profile and sent in the last two seconds |
+| A command for a glove | Refused unless it is connected | Refused unless it sent in the last two seconds |
 | Raw `hall` with gap fill on | A sensor that read all zeros carries the reading gap fill gave it | The glove's own zeros. Its cancelled counts are the filled reading, cancelled, as through the app |
 
+
+#### The receiver's own lines, and damaged frames
+
+Among the gloves' frames the receiver sends lines of text about itself and
+the link: `BL:` (the radio link to a glove), `PONG`, `DFU:` (firmware
+updates) and others. `gloves.on_line(callback)` hands each one to your
+function, without its line end, in order with the packets:
+
+```python
+gloves.on_line(lambda text: print("receiver:", text))     # "BL:CONN NRF_GLOVE_E5D1", ...
+print(gloves.packets, gloves.bad_frames)                  # tracking packets, damaged frames
+```
+
+- It runs on the reading thread, as an [`on()` callback](#a-callback-per-message)
+  does, with the same rules: keep it short; if it raises, the source ends
+  with `Disconnected` code `callback_failed`. `on_line(None)` stops it.
+  Without it, the lines are dropped.
+- A line of bytes no status line has (the tail of a frame cut off when the
+  port was opened) is not passed on.
+- `gloves.bad_frames` counts the binary frames that failed their COBS or CRC
+  check, beside `gloves.packets`, the tracking packets read. Each frame is
+  told apart by `pandora-core`'s own framing code, not a copy of it.
+- Only without the app: the app keeps the receiver's lines to itself. A line
+  callback is not a stream: the lines belong to no glove, so they have no
+  `latest()`, no subscription and no queue (put them on a `queue.Queue` from
+  the callback if you want one).
+
+#### Opening the receiver yourself
+
+`open_receiver()` finds and opens the receiver itself. A program that wants to
+choose among several receivers, set its own timeouts, or keep the port open
+across sources opens it and hands it over:
+
+```python
+for found in pandora_sdk.list_receivers():       # by port, COM9 before COM10
+    print(found.device, found.serial_number, found.product)
+
+port = pandora_sdk.open_link("COM7", timeout=0.05, write_timeout=1.0)
+gloves = pandora_sdk.Local(link=port)             # closing gloves closes the port
+```
+
+| Call | Gives |
+| --- | --- |
+| `list_receivers()` | The receivers plugged in, as `ReceiverPort` (`device`, the port to open; `serial_number`, the receiver's stable identity, `""` when it reports none; `product`), sorted by port name in number order |
+| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use` or `open_failed` when the port will not open |
+
+`Local(link=...)` reads any object with the port's `read`, `in_waiting`,
+`write` and `close`, which is also how to feed it a recording or a simulator.
 
 One thread runs every glove's pipeline. On the PC this was written on, a
 packet takes about a millisecond with both streams and the skeleton on, and a
@@ -336,14 +472,22 @@ glove sends 200 a second.
 A glove's pipeline runs only while a `frames` or `debug` subscription includes
 it, or a `raw` one with `cancelled=True`, whose counts exist only once the
 pipeline has had the packet. With none of these (only plain `raw`, or nothing
-yet), each packet makes the raw message and nothing else: about 30
-microseconds a packet on the PC this was written on, against 0.6 to 1.9
-milliseconds with the pipeline. A frames subscription narrowed to one hand or
+yet), each packet makes the raw message and nothing else: about 5
+microseconds of handling a packet on the PC this was written on (median over
+recorded packets, not counting reading the port and splitting the frames),
+against 0.6 to 1.9 milliseconds with the pipeline. A frames subscription narrowed to one hand or
 one glove leaves the others raw only.
 
-- `calibration()`, `latest_calibration()` and `set_hall_range` work as
-  ever: a glove's first packet, and its first after a range change, still go
-  through a pipeline, which loads its profile and its range.
+- No pipeline is built for a raw-only glove at all, not even for its first
+  packet. `calibration()` and `latest_calibration()` build one when asked,
+  loading the glove's profile (and its range) with its newest packet, a
+  millisecond or a few once; `set_hall_range` works as ever.
+- The pipeline's default files (`hall_reference.default.json` and the others
+  `pandora-core` ships, or `defaults=`) are read only when the first pipeline
+  is wanted. Without them, raw-only reading works; subscribing to frames,
+  debug or cancelled raw, or asking for `calibration()`, raises
+  `PandoraError` instead of making wrong hands. A frozen program (PyInstaller)
+  that only reads raw needs no `--collect-data pandora_core`.
 - **Subscribing to frames (or to raw with `cancelled`) later starts that
   glove's pipeline afresh at the next packet**, as when the glove is switched
   on: its smoothing and other filters, earth-field cancellation's among them,
@@ -361,6 +505,42 @@ one glove leaves the others raw only.
 | `pandora_sdk.ServerError` | The app refused a request, or a command could not be sent; `.code` is the protocol's error code. Without the app the same codes are raised for the same reasons |
 | `pandora_sdk.Disconnected` | The app went away, or the receiver was unplugged, while you were reading |
 | `TimeoutError` | A `read(timeout=...)` or a request ran out of time |
+
+`ConnectionFailed` and `Disconnected` carry a `.code` that says which case it
+was, for a program to act on without reading the words, and the error from
+the OS (or the socket library, or your callback) that caused it as
+`__cause__`. The codes are stable; the words may change.
+
+```python
+try:
+    gloves = pandora_sdk.open_receiver()
+except pandora_sdk.ConnectionFailed as failed:
+    if failed.code == "in_use":
+        print("close the 01 Glove app first")
+    raise
+```
+
+| `ConnectionFailed.code` | When |
+| --- | --- |
+| `no_receiver` | No receiver is plugged in |
+| `several_receivers` | More than one is plugged in and no port was named |
+| `in_use` | Another program holds the receiver's port; the app, when it runs |
+| `open_failed` | The port would not open for another reason |
+| `app_not_running` | Nothing answered at the app's address: it is not running, or Protocol is off |
+| `not_the_app` | Something answered there but sent no hello |
+
+| `Disconnected.code` | When |
+| --- | --- |
+| `closed` | You called `close()` |
+| `unplugged` | The receiver was unplugged |
+| `read_failed` | Reading the receiver's port failed for another reason |
+| `pipeline_failed` | Without the app: a glove's pipeline raised |
+| `app_closed` | The app closed the connection (it quit, or Protocol was switched off) |
+| `connection_lost` | The connection to the app broke |
+| `callback_failed` | Your callback raised (see [A callback per message](#a-callback-per-message)) |
+
+`pandora_sdk.CONNECTION_FAILED_CODES` and `pandora_sdk.DISCONNECTED_CODES` hold
+the same lists.
 
 If your loop reads more slowly than frames arrive, the oldest unread ones are
 discarded (256 are kept per stream; `connect(buffer=...)` changes that) and
@@ -509,17 +689,17 @@ commit you pin must carry a higher `pandora-core` version** (its
 `pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
 installed core whose version matches, whatever commit it came from, so a pin
 to a new commit with the same version leaves people on the old core. The pin
-is at 0.3.0 now (`661b64c`). Then install again with
+is at 0.4.0 now (`56b63dd`). Then install again with
 `pip install --force-reinstall -e ".[dev]"`, or, to replace only the core:
 
 ```bash
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
-  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@661b64c0aa914ecad881fe7c92e7ca0d4b1f6620#subdirectory=pandora-core"
+  pip install --force-reinstall --no-deps "pandora-core[serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@56b63ddb0e1ba323c291aa39f18a812b82f02083#subdirectory=pandora-core"
 ```
 
 ## Not here yet
 
-- Any of it tried on a real glove: the haptics and Hall range commands,
+- Any of it tried on a real glove: the haptics and Hall commands,
   `pandora calibrate` and `pandora update-firmware` have met simulated gloves,
   recorded packets and made-up receivers only.
 - The glove's other settings (haptic drive, power-off time) and running a

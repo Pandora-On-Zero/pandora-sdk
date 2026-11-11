@@ -140,6 +140,7 @@ def test_the_raw_stream_carries_the_gloves_own_readings(link, gloves):
         RIGHT, "right", 1, 4321)
     assert reading.hall[1][0] == (112, 113, 114)
     assert (reading.reference, reading.battery_pct) == ((7, 8, 9), 87)
+    assert (reading.battery_mv, reading.usb_power, reading.gatt_commands) == (4000, False, False)
 
 
 def test_a_glove_with_no_profile_is_left_out_and_named(link, gloves):
@@ -149,6 +150,86 @@ def test_a_glove_with_no_profile_is_left_out_and_named(link, gloves):
 
     assert gloves.read(timeout=2.0).device == RIGHT
     assert gloves.unprofiled == {STRANGER}
+
+
+# ── raw only for a glove with no profile ─────────────────────────────────────
+
+def test_a_glove_with_no_profile_has_its_raw_readings_passed_on_as_a_right_hand(link, gloves):
+    gloves.subscribe("raw")
+
+    link.feed(packet_line(STRANGER, glove_ms=77))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert (reading.device, reading.hand, reading.seq, reading.glove_ms) == (
+        STRANGER, "right", 1, 77)
+    assert reading.hall[1][0] == (112, 113, 114)
+    assert gloves.unprofiled == {STRANGER}
+
+
+def test_the_hand_a_glove_with_no_profile_is_read_as_can_be_chosen(link, clock):
+    with pandora_sdk.Local({}, link=link, defaults={}, clock=clock,
+                           default_hand="left") as gloves:
+        gloves.subscribe("raw", hands=["left"])
+        link.feed(packet_line(STRANGER))
+
+        assert gloves.read("raw", timeout=2.0).hand == "left"
+
+
+def test_with_no_default_hand_a_glove_with_no_profile_is_left_out_of_raw_too(link, clock):
+    with pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock,
+                           default_hand=None) as gloves:
+        gloves.subscribe("raw")
+        link.feed(packet_line(STRANGER), packet_line(RIGHT))
+
+        assert gloves.read("raw", timeout=2.0).device == RIGHT
+        assert gloves.unprofiled == {STRANGER}
+        assert [device.id for device in gloves.devices()] == [RIGHT]
+
+
+def test_a_default_hand_that_is_no_hand_is_refused(link):
+    with pytest.raises(ValueError, match="default_hand"):
+        pandora_sdk.Local({}, link=link, default_hand="both")
+
+
+def test_a_glove_with_no_profile_gets_no_pipeline_whatever_is_asked_for(link, gloves, pushes):
+    gloves.subscribe(bones=False)
+    gloves.subscribe("debug")
+    gloves.subscribe("raw", cancelled=True)
+
+    feed(link, gloves, packet_line(STRANGER), packet_line(STRANGER))
+
+    reading = gloves.read("raw", timeout=2.0)
+    assert reading.device == STRANGER
+    assert (reading.hall_cancelled, reading.earth_cancelled) == (None, None)
+    assert pushes == []
+    assert gloves.latest(STRANGER) is None and gloves.latest(STRANGER, "debug") is None
+
+
+def test_a_glove_with_no_profile_is_listed_with_the_default_hand(link, gloves):
+    feed(link, gloves, packet_line(STRANGER))
+
+    assert gloves.devices() == [Device(STRANGER, "right", "", True)]
+
+
+def test_a_glove_with_no_profile_takes_commands(link, gloves):
+    feed(link, gloves, packet_line(STRANGER))
+
+    gloves.stop(STRANGER)
+
+    assert sent(link, GLOVE_PKT_HAPTIC_RTP, USB_HAPTIC_RTP_FORMAT) == [
+        (GLOVE_PKT_HAPTIC_RTP, STRANGER.encode().ljust(16, b"\0"), *([0] * 12))]
+
+
+def test_a_glove_with_no_profile_has_no_calibration_and_needs_no_pipeline_for_it(
+        link, no_default_files, pushes):
+    with pandora_sdk.Local({}, link=link) as gloves:
+        feed(link, gloves, packet_line(STRANGER))
+
+        bounds = gloves.calibration(STRANGER)
+
+    assert (bounds.device, bounds.hall_range, bounds.extrapolated, bounds.calibrations) == (
+        STRANGER, None, False, {})
+    assert pushes == []
 
 
 def test_devices_lists_the_gloves_heard_with_hand_name_and_whether_they_still_send(
@@ -232,13 +313,203 @@ def test_a_receiver_the_app_holds_is_reported_as_in_use(monkeypatch):
         pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
 
 
-def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypatch):
-    """A pandora-core from before it carried them; hands made without them
-    would be wrong, silently."""
+# ── error codes ──────────────────────────────────────────────────────────────
+
+def test_no_receiver_has_its_code(monkeypatch):
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, defaults={})
+
+    assert failed.value.code == "no_receiver"
+
+
+def test_two_receivers_have_their_code(monkeypatch):
+    monkeypatch.setattr(receiver, "find_receivers", lambda: [
+        receiver.ReceiverPort("COM7", "A", "01 Receiver"),
+        receiver.ReceiverPort("COM9", "B", "01 Receiver")])
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, defaults={})
+
+    assert failed.value.code == "several_receivers"
+
+
+def test_a_receiver_in_use_has_its_code_and_the_os_error_as_its_cause(monkeypatch):
+    refusal = OSError("could not open port 'COM7': PermissionError(13, 'Access is denied.')")
+
+    def _held(port, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(receiver, "open_port", _held)
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
+
+    assert failed.value.code == "in_use"
+    assert failed.value.__cause__ is refusal
+
+
+def test_a_port_that_will_not_open_for_another_reason_has_its_code(monkeypatch):
+    refusal = OSError("could not open port 'COM7': FileNotFoundError(2, 'not found')")
+
+    def _missing(port, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(receiver, "open_port", _missing)
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
+
+    assert failed.value.code == "open_failed"
+    assert failed.value.__cause__ is refusal
+
+
+def test_an_unplugged_receiver_has_its_code_and_the_os_error_as_its_cause(link, gloves):
+    link.unplugged = True
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "unplugged"
+    assert isinstance(lost.value.__cause__, OSError)
+
+
+def test_a_read_that_fails_otherwise_has_its_code(link, gloves, monkeypatch):
+    def _broken(_count):
+        raise OSError("the port said no")
+
+    monkeypatch.setattr(link, "read", _broken)
+
+    with pytest.raises(pandora_sdk.Disconnected, match="the port said no") as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "read_failed"
+
+
+def test_reading_a_closed_source_has_its_code(link, clock):
+    opened = pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock)
+    opened.close()
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        opened.read(timeout=2.0)
+
+    assert lost.value.code == "closed"
+
+
+def test_a_callback_that_raised_has_its_code_and_its_error_as_the_cause(link, gloves):
+    def _broken(reading):
+        raise ValueError("no such key")
+
+    gloves.on("raw", _broken)
+    gloves.subscribe("raw")
+    link.feed(packet_line(RIGHT))
+
+    with pytest.raises(pandora_sdk.Disconnected) as lost:
+        gloves.read(timeout=2.0)
+
+    assert lost.value.code == "callback_failed"
+    assert isinstance(lost.value.__cause__, ValueError)
+
+
+# ── opening the port, and the receivers plugged in ───────────────────────────
+
+@pytest.fixture
+def opened_with(monkeypatch):
+    """The arguments each receiver.open_port call was given, the port
+    returned being a made-up one."""
+    calls = []
+
+    def _open(port, **kwargs):
+        calls.append((port, kwargs))
+        return Link()
+
+    monkeypatch.setattr(receiver, "open_port", _open)
+    return calls
+
+
+def test_open_link_opens_the_port_with_the_timeouts_asked_for(opened_with):
+    pandora_sdk.open_link("COM7", timeout=0.05, write_timeout=1.0)
+
+    assert opened_with == [("COM7", {"timeout": 0.05, "write_timeout": 1.0})]
+
+
+def test_open_link_by_default_waits_a_fifth_of_a_second_to_read_and_two_to_write(opened_with):
+    pandora_sdk.open_link("COM7")
+
+    assert opened_with == [("COM7", {"timeout": 0.2, "write_timeout": 2.0})]
+
+
+def test_list_receivers_gives_the_receivers_plugged_in_in_port_order(monkeypatch):
+    found = [receiver.ReceiverPort("COM10", "B", "01 Receiver"),
+             receiver.ReceiverPort("COM9", "A", "01 Receiver")]
+    monkeypatch.setattr(receiver, "find_receivers", lambda: found)
+
+    assert pandora_sdk.list_receivers() == [found[1], found[0]]
+
+
+def test_list_receivers_with_none_plugged_in_is_empty():
+    assert pandora_sdk.list_receivers() == []
+
+
+# ── knowing it ended without reading ─────────────────────────────────────────
+
+def test_a_running_source_has_not_ended(gloves):
+    assert gloves.ended is False
+    assert gloves.wait_ended(0.05) is False
+    assert gloves.end_error is None
+
+
+def test_a_source_whose_receiver_was_unplugged_has_ended_and_says_why(link, gloves):
+    gloves.on("raw", lambda reading: None)
+    gloves.subscribe("raw")
+
+    link.unplugged = True
+
+    assert gloves.wait_ended(2.0) is True
+    assert gloves.ended is True
+    error = gloves.end_error
+    assert isinstance(error, pandora_sdk.Disconnected) and error.code == "unplugged"
+
+
+def test_a_closed_source_has_ended(link, clock):
+    opened = pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock)
+    opened.close()
+
+    assert opened.ended and opened.wait_ended(0) is True
+    assert opened.end_error is not None and opened.end_error.code == "closed"
+
+
+@pytest.fixture
+def no_default_files(monkeypatch):
+    """A pandora-core that carries none of the pipeline's default files (an
+    old one, or a frozen program built without them); hands made without
+    them would be wrong, silently."""
     monkeypatch.setattr("pandora_sdk.local.shipped_defaults", lambda: {})
 
-    with pytest.raises(pandora_sdk.PandoraError, match="default files"):
-        pandora_sdk.Local(PROFILES, link=link)
+
+def test_without_the_pipelines_default_files_raw_readings_still_come(link, no_default_files):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        gloves.subscribe("raw")
+        link.feed(packet_line(RIGHT), packet_line(LEFT))
+
+        assert {gloves.read("raw", timeout=2.0).device for _ in range(2)} == {RIGHT, LEFT}
+
+
+@pytest.mark.parametrize("subscription", [{"stream": "frames"}, {"stream": "debug"},
+                                          {"stream": "raw", "cancelled": True}],
+                         ids=["frames", "debug", "raw-cancelled"])
+def test_without_the_pipelines_default_files_a_stream_that_needs_it_is_refused(
+        link, no_default_files, subscription):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
+            gloves.subscribe(**subscription)
+
+
+def test_without_the_pipelines_default_files_calibration_is_refused(link, no_default_files):
+    with pandora_sdk.Local(PROFILES, link=link) as gloves:
+        feed(link, gloves, packet_line(RIGHT))
+
+        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
+            gloves.calibration(RIGHT)
 
 
 # ── wall time ────────────────────────────────────────────────────────────────
@@ -383,6 +654,138 @@ def test_a_glove_that_comes_back_after_going_silent_is_put_on_its_range_again(
     assert sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)[1][3] == HALL_RANGE_50MT
 
 
+# ── the full Hall config, and ranges not sent again ──────────────────────────
+
+def hall_sent(link):
+    return sent(link, GLOVE_PKT_HALL_CONFIG, USB_HALL_CONFIG_FORMAT)
+
+
+def test_send_hall_config_writes_exactly_the_settings_given(link, heard):
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, osr=0, odr=6, filter=5, target=4)
+
+    assert hall_sent(link) == [(GLOVE_PKT_HALL_CONFIG, ID, 0, HALL_RANGE_50MT, 0, 6, 5, 4)]
+
+
+def test_send_hall_config_by_default_is_every_sensor_on_its_power_up_settings(link, heard):
+    heard.send_hall_config(RIGHT)
+
+    assert hall_sent(link) == [(GLOVE_PKT_HALL_CONFIG, ID, 0, HALL_RANGE_5MT, HALL_DEFAULT_OSR,
+                                HALL_DEFAULT_ODR, HALL_DEFAULT_FILTER, HALL_TARGET_ALL)]
+
+
+def test_send_hall_config_can_reset_the_sensors_to_the_firmware_defaults(link, heard):
+    heard.send_hall_config(RIGHT, reset=True)
+
+    assert hall_sent(link)[0][2] == 1
+
+
+@pytest.mark.parametrize("sensor, target", [("Index/Meta", 4), ("Thumb/Distal", 2),
+                                            ("Reference", 15)])
+def test_send_hall_config_names_a_sensor_by_its_key(link, heard, sensor, target):
+    heard.send_hall_config(RIGHT, target=sensor)
+
+    assert hall_sent(link)[0][-1] == target
+
+
+@pytest.mark.parametrize("settings, code", [
+    ({"hall_range": 2}, "bad_hall_range"), ({"osr": 2}, "bad_hall_config"),
+    ({"odr": 9}, "bad_hall_config"), ({"filter": 8}, "bad_hall_config"),
+    ({"target": 5}, "bad_hall_config"), ({"target": "Index/Distal"}, "bad_hall_config"),
+    ({"filter": -1}, "bad_hall_config")])
+def test_hall_settings_the_glove_has_no_value_for_are_refused_and_not_sent(
+        link, heard, settings, code):
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.send_hall_config(RIGHT, **settings)
+
+    assert refused.value.code == code
+    assert link.written == []
+
+
+def test_a_hall_config_for_a_glove_not_sending_is_refused(link, heard, clock):
+    clock.now += 3.0
+
+    with pytest.raises(pandora_sdk.ServerError) as refused:
+        heard.send_hall_config(RIGHT, reset=True)
+
+    assert refused.value.code == "unknown_device"
+
+
+def come_back(link, gloves, clock):
+    """The right glove silent for 3 s, then sending again."""
+    clock.now += 3.0
+    feed(link, gloves, packet_line(RIGHT))
+
+
+def test_a_hall_config_is_not_sent_again_when_the_glove_comes_back(link, heard, clock):
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 1
+
+
+def test_a_range_set_with_resend_off_is_not_sent_again_when_the_glove_comes_back(
+        link, heard, clock):
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT, resend=False)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 1
+
+
+def test_a_range_set_with_resend_off_forgets_the_one_remembered_before(link, heard, clock):
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    heard.set_hall_range(RIGHT, HALL_RANGE_5MT, resend=False)
+
+    come_back(link, heard, clock)
+
+    assert len(hall_sent(link)) == 2
+
+
+def test_a_reset_forgets_the_range_remembered_and_raw_says_the_default_range(
+        link, heard, clock):
+    heard.subscribe("raw")
+    heard.set_hall_range(RIGHT, HALL_RANGE_50MT)
+    feed(link, heard, packet_line(RIGHT))
+    assert heard.read("raw", timeout=2.0).hall_range == HALL_RANGE_50MT
+
+    heard.send_hall_config(RIGHT, reset=True)
+    come_back(link, heard, clock)
+
+    assert [command[2] for command in hall_sent(link)] == [0, 1]
+    assert heard.read("raw", timeout=2.0).hall_range == HALL_RANGE_5MT
+
+
+def test_after_a_hall_config_for_every_sensor_raw_messages_say_its_range(link, heard):
+    heard.subscribe("raw")
+
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+    feed(link, heard, packet_line(RIGHT))
+
+    reading = heard.read("raw", timeout=2.0)
+    assert (reading.hall_range, reading.sensor_ranges) == (HALL_RANGE_50MT, {})
+
+
+def test_after_a_hall_config_for_one_sensor_raw_messages_say_that_sensors_range(link, heard):
+    heard.subscribe("raw")
+
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, target="Index/Prox")
+    heard.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT, target=15)
+    feed(link, heard, packet_line(RIGHT))
+
+    reading = heard.read("raw", timeout=2.0)
+    assert (reading.hall_range, reading.sensor_ranges) == (
+        None, {"Index/Prox": HALL_RANGE_50MT, "Reference": HALL_RANGE_50MT})
+
+
+def test_after_a_hall_config_the_calibration_is_rescaled_to_its_range(link, calibrated):
+    calibrated.send_hall_config(RIGHT, hall_range=HALL_RANGE_50MT)
+    link.feed(packet_line(RIGHT))
+
+    assert wait(lambda: calibrated.calibration(RIGHT).hall_range == HALL_RANGE_50MT)
+    assert calibrated.calibration(RIGHT).extrapolated
+
+
 # ── calibration bounds ───────────────────────────────────────────────────────
 
 def test_calibration_of_a_glove_is_the_bounds_its_pipeline_normalises_with(calibrated):
@@ -464,14 +867,14 @@ def feed(link, gloves, *lines):
 @pytest.mark.parametrize("streams", [(), ("raw",)])
 def test_with_neither_frames_nor_debug_asked_for_a_glove_skips_the_pipeline(
         link, gloves, pushes, streams):
-    """Only its first packet goes through: that loads the glove's profile,
-    which calibration() reads."""
+    """Not even its first packet: its pipeline is built only when one is
+    needed (calibration() builds one when asked)."""
     for stream in streams:
         gloves.subscribe(stream)
 
     feed(link, gloves, *(packet_line(RIGHT, glove_ms=ms) for ms in range(1, 6)))
 
-    assert [ms for _, _, ms in pushes] == [1]
+    assert pushes == []
 
 
 def test_a_glove_no_frames_subscription_includes_skips_the_pipeline(link, gloves, pushes):
@@ -480,7 +883,7 @@ def test_a_glove_no_frames_subscription_includes_skips_the_pipeline(link, gloves
     feed(link, gloves, *(packet_line(device, glove_ms=ms)
                          for ms in range(1, 4) for device in (LEFT, RIGHT)))
 
-    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+    assert [ms for _, device, ms in pushes if device == LEFT] == []
     assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3]
 
 
@@ -496,8 +899,20 @@ def test_frames_asked_for_late_come_from_a_new_pipeline_started_at_that_packet(
 
     assert gloves.read(timeout=2.0).seq == 4
     pipeline = {ms: glove for glove, _, ms in pushes}
-    assert sorted(pipeline) == [1, 4, 5]
-    assert pipeline[4] is not pipeline[1] and pipeline[5] is pipeline[4]
+    assert sorted(pipeline) == [4, 5]
+    assert pipeline[5] is pipeline[4]
+
+
+def test_calibration_of_a_raw_only_glove_builds_its_pipeline_when_asked(link, clock, pushes):
+    with pandora_sdk.Local(CALIBRATED, link=link, defaults={}, clock=clock) as gloves:
+        gloves.subscribe("raw")
+        feed(link, gloves, packet_line(RIGHT, glove_ms=1), packet_line(RIGHT, glove_ms=2))
+        assert pushes == []
+
+        bounds = gloves.calibration(RIGHT)
+
+    assert bounds.calibrations["Index"]["prox_min"] == (-800.0, 140.0, 2200.0)
+    assert [ms for _, _, ms in pushes] == [2]
 
 
 # ── raw counts after earth-field cancellation ────────────────────────────────
@@ -546,7 +961,7 @@ def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, g
                          for ms in range(1, 6) for device in (LEFT, RIGHT)))
 
     assert [ms for _, device, ms in pushes if device == RIGHT] == [1, 2, 3, 4, 5]
-    assert [ms for _, device, ms in pushes if device == LEFT] == [1]
+    assert [ms for _, device, ms in pushes if device == LEFT] == []
 
 
 # A real glove with earth-field cancellation on: tests/data/right_earth.json,
@@ -732,3 +1147,81 @@ def test_a_callback_that_raises_ends_the_source_with_its_error(link, gloves):
 def test_a_callback_for_a_stream_that_does_not_exist_is_refused(gloves):
     with pytest.raises(ValueError, match="no stream 'hands'"):
         gloves.on("hands", print)
+
+
+# ── the receiver's text lines, and damaged frames ────────────────────────────
+
+def damaged(line: bytes) -> bytes:
+    """*line* with one byte of its body changed so its check fails, still
+    one line."""
+    changed = bytearray(line)
+    for at in range(len(changed) // 2, len(changed) - 1):
+        if changed[at] ^ 0x40 not in (0x00, 0x0A):
+            changed[at] ^= 0x40
+            return bytes(changed)
+    raise AssertionError("no byte to change")
+
+
+def test_the_receivers_text_lines_reach_on_line_in_order_on_the_reader_thread(link, gloves):
+    lines = []
+    gloves.on_line(lambda text: lines.append((text, threading.current_thread().name)))
+    gloves.subscribe("raw")
+
+    link.feed(b"BL:CONN NRF_GLOVE_E5D1\r\n", packet_line(RIGHT), b"PONG\n", packet_line(RIGHT))
+    assert wait(lambda: len(lines) == 2 and gloves.packets == 2)
+
+    assert lines == [("BL:CONN NRF_GLOVE_E5D1", "pandora-sdk-receiver"),
+                     ("PONG", "pandora-sdk-receiver")]
+    assert [gloves.read("raw", timeout=2.0).seq for _ in range(2)] == [1, 2]
+
+
+def test_a_damaged_frame_is_counted_and_left_out(link, gloves):
+    gloves.subscribe("raw")
+
+    feed(link, gloves, packet_line(RIGHT, glove_ms=1))
+    link.feed(damaged(packet_line(RIGHT, glove_ms=2)), b"DFU:READY\n")
+    feed(link, gloves, packet_line(RIGHT, glove_ms=3))
+
+    assert gloves.bad_frames == 1
+    assert [gloves.read("raw", timeout=2.0).glove_ms for _ in range(2)] == [1, 3]
+    assert gloves.packets == 2
+
+
+def test_the_tail_of_a_frame_cut_off_when_the_port_opened_is_neither_text_nor_damage(
+        link, gloves):
+    lines = []
+    gloves.on_line(lines.append)
+    tail = packet_line(RIGHT)[40:]
+    assert any(byte < 0x09 or byte >= 0x80 for byte in tail[:-1])
+
+    link.feed(tail, b"BL:READY\n")
+    assert wait(lambda: lines)
+
+    assert lines == ["BL:READY"]
+    assert gloves.bad_frames == 0
+
+
+def test_with_on_line_given_none_text_lines_are_dropped_again(link, gloves):
+    lines = []
+    gloves.on_line(lines.append)
+    link.feed(b"PONG:1\n")
+    assert wait(lambda: lines)
+
+    gloves.on_line(None)
+    link.feed(b"PONG:2\n")
+    feed(link, gloves, packet_line(RIGHT))
+
+    assert lines == ["PONG:1"]
+
+
+def test_an_on_line_callback_that_raises_ends_the_source_with_its_error(link, gloves):
+    def _broken(text):
+        raise ValueError("bad line")
+
+    gloves.on_line(_broken)
+    link.feed(b"BL:CONN\n")
+
+    assert gloves.wait_ended(2.0)
+    error = gloves.end_error
+    assert error is not None and error.code == "callback_failed"
+    assert isinstance(error.__cause__, ValueError) and "bad line" in str(error)

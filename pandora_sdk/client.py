@@ -19,12 +19,14 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple, Union
 
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect as _open_socket
 
 from pandora_core import protocol
+from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                        HALL_DEFAULT_RANGE, HALL_TARGET_ALL)
 from pandora_core.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
                                    ProtocolError, Subscription)
 
@@ -76,7 +78,8 @@ class Client(Source):
         except (OSError, TimeoutError, WebSocketException) as failed:
             raise ConnectionFailed(
                 f"nothing answered at {url} ({failed}). Is the 01 Glove app running with "
-                "Protocol switched on (Settings > General > Advanced > Protocol)?") from None
+                "Protocol switched on (Settings > General > Advanced > Protocol)?",
+                "app_not_running") from failed
         self.server = self._exchange_hellos(url, name)
 
         # Answers to requests, oldest first (REPLIES).
@@ -109,7 +112,7 @@ class Client(Source):
             self._socket.close()
             raise ConnectionFailed(
                 f"{url} answered but sent no hello ({failed or 'timed out'}); "
-                "is that port the 01 Glove app's?") from None
+                "is that port the 01 Glove app's?", "not_the_app") from failed
         return Server(str(hello.get("server", "")), str(hello.get("version", "")),
                       hello["protocol"], tuple(hello.get("capabilities", ())))
 
@@ -157,10 +160,25 @@ class Client(Source):
                       "haptics_sent", timeout, device=device)
 
     def set_hall_range(self, device: str, hall_range: int,
-                       timeout: Optional[float] = None) -> str:
+                       timeout: Optional[float] = None, *, resend: bool = True) -> str:
         reply = self._request(HallRange(device, hall_range).to_message(), "hall_range", timeout,
                               device=device)
         return str(reply.get("note", ""))
+
+    def send_hall_config(self, device: str, *, reset: bool = False,
+                         hall_range: int = HALL_DEFAULT_RANGE, osr: int = HALL_DEFAULT_OSR,
+                         odr: int = HALL_DEFAULT_ODR, filter: int = HALL_DEFAULT_FILTER,
+                         target: Union[int, str] = HALL_TARGET_ALL,
+                         timeout: Optional[float] = None) -> None:
+        """Refused: through the app, Hall settings beyond the range are the
+        app's (Debug > Hall Effect Firmware Settings), and the protocol has
+        no message for them. set_hall_range sends a range; open_receiver()
+        sends any Hall config, with the app closed."""
+        raise ServerError(
+            "not_supported",
+            "through the app, Hall settings beyond the range are the app's, and the protocol "
+            "has no message for them: use set_hall_range for the range, or close the app and "
+            "read the receiver with pandora_sdk.open_receiver() to send a full Hall config")
 
     # ── calibration bounds ───────────────────────────────────────────────
 
@@ -186,8 +204,12 @@ class Client(Source):
                 self._replies.clear()
             try:
                 self._socket.send(protocol.dumps(message))
-            except ConnectionClosed:
-                raise Disconnected(self._why_ended()) from None
+            except ConnectionClosed as closed:
+                with self._changed:
+                    if self._closed or self._ended:
+                        raise self._disconnected() from None
+                raise Disconnected(f"the connection to the app was lost ({closed})",
+                                   "connection_lost") from closed
             deadline = time.monotonic() + timeout
             with self._changed:
                 while True:
@@ -200,7 +222,7 @@ class Client(Source):
                                 reply.get(key) == value for key, value in match.items()):
                             return reply
                     if self._closed or self._ended:
-                        raise Disconnected(self._why_ended())
+                        raise self._disconnected()
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError(
@@ -212,7 +234,7 @@ class Client(Source):
     def _read_socket(self) -> None:
         """The reader thread: sort what arrives until the connection ends, or
         a callback (on()) raises."""
-        why = "the app closed the connection"
+        why, code, cause = "the app closed the connection", "app_closed", None
         try:
             for message in self._socket:
                 if isinstance(message, str):
@@ -220,10 +242,11 @@ class Client(Source):
                 else:
                     self._on_binary(bytes(message))
         except ConnectionClosed as closed:
-            why = f"the connection to the app was lost ({closed})"
+            why, code, cause = (f"the connection to the app was lost ({closed})",
+                                "connection_lost", closed)
         except CallbackFailed as failed:
-            why = str(failed)
-        self._end(why)
+            why, code, cause = str(failed), "callback_failed", failed.__cause__
+        self._end(why, code, cause)
 
     def _on_text(self, text: str) -> None:
         try:

@@ -39,8 +39,8 @@ from pandora_core.packet_layout import (
 )
 from pandora_core.tuning import Tuning
 
-from pandora_sdk.local import (default_profiles_dir, link_failure, link_packets, load_profiles,
-                               save_profile, send_command)
+from pandora_sdk.local import (default_profiles_dir, link_failure, link_failure_code,
+                               link_packets, load_profiles, save_profile, send_command)
 from pandora_sdk.source import Disconnected, PandoraError
 
 # The cue: the back-of-hand motor at full drive (pandora_core commands.haptic_rtp
@@ -187,7 +187,7 @@ def _packets(link: Any) -> Packets:
     try:
         yield from link_packets(link)
     except OSError as failed:
-        raise Disconnected(link_failure(failed)) from None
+        raise Disconnected(link_failure(failed), link_failure_code(failed)) from failed
 
 
 def _from(feed: Packets, device: str, wait_s: float) -> Iterator[GlovePacket]:
