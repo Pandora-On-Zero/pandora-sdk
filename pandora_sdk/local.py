@@ -8,12 +8,19 @@
             print(hand.angles_deg)
 
 The same reading as connect() gives (subscribe, frames, raw, debug, read,
-latest, devices), the same Frame, Raw and Debug, and the same commands for a
+latest, on, devices), the same Frame, Raw and Debug, and the same commands for a
 glove (play_rom, play_rtp, stop, set_hall_range) and calibration bounds, so a
 program can change between the two by changing one line. Here the pipeline
 (pandora-core) runs in this process: one thread reads the receiver's port and
 pushes each glove's packets through that glove's own pipeline, and commands
 are written to the same port.
+
+A glove's pipeline runs only while a frames or debug subscription includes
+it; with raw alone, its packets make the raw message and nothing else. Its
+first packet still goes through a pipeline, which loads the profile that
+calibration() reads. A pipeline that missed packets starts again as a new one
+at the next packet it is wanted for, so its smoothing begins there, as on a
+glove's first packet.
 
 Each glove needs a profile: its hand and the calibration it carries. `pandora
 calibrate` (pandora_sdk/calibrate.py) writes one, into default_profiles_dir()
