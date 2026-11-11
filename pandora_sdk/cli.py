@@ -4,6 +4,7 @@ firmware, without writing code.
     pandora devices                      the gloves the app knows
     pandora watch --hand right           hands as they arrive, ten a second
     pandora watch --raw --rate 0         every raw packet
+    pandora watch --raw --cancelled      raw counts after earth-field cancellation
     pandora calibrate --hand right       calibrate a glove with no app running
     pandora watch --local                hands straight from the receiver
     pandora update-firmware glove IMAGE  flash a glove (or the receiver)
@@ -18,7 +19,7 @@ import argparse
 import io
 import sys
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Sequence, Set
 
 from pandora_core.calibration_session import Run
 from pandora_core.protocol import DEFAULT_PORT, HANDS, Frame, ProtocolError, Raw
@@ -30,6 +31,9 @@ from pandora_sdk.local import (Local, default_profiles_dir, load_profiles, open_
                                open_receiver)
 from pandora_sdk.source import PandoraError, Source
 
+# The hand `watch --local --raw` reads a glove with no profile as.
+UNPROFILED_HAND = "right"
+
 
 def _frame_line(hand: Frame) -> str:
     curl = " ".join(f"{finger[0]:.2f}" for finger in hand.curl)
@@ -39,9 +43,20 @@ def _frame_line(hand: Frame) -> str:
             f"wrist {wrist}")
 
 
-def _raw_line(reading: Raw) -> str:
-    hall = "  ".join(",".join(f"{axis:.0f}" for axis in finger[0]) for finger in reading.hall)
-    return (f"{reading.hand:<5}  {reading.device}  #{reading.seq}  hall {hall}  "
+def _proximal(hall: Sequence[Sequence[Sequence[float]]]) -> str:
+    """Each finger's proximal sensor, x,y,z."""
+    return "  ".join(",".join(f"{axis:.0f}" for axis in finger[0]) for finger in hall)
+
+
+def _raw_line(reading: Raw, cancelled: bool = False) -> str:
+    if not cancelled:
+        counts = f"hall {_proximal(reading.hall)}"
+    elif reading.hall_cancelled is None:
+        counts = "cancelled -"
+    else:
+        what = "earth cancelled" if reading.earth_cancelled else "nothing cancelled"
+        counts = f"cancelled {_proximal(reading.hall_cancelled)}  {what}"
+    return (f"{reading.hand:<5}  {reading.device}  #{reading.seq}  {counts}  "
             f"battery {reading.battery_pct}%")
 
 
@@ -54,34 +69,50 @@ def _devices(gloves: Source) -> int:
 
 def _watch(gloves: Source, args: argparse.Namespace) -> int:
     stream = "raw" if args.raw else "frames"
-    gloves.subscribe(stream, devices=args.device, hands=args.hand or HANDS, rate_hz=args.rate,
-                     bones=False)
+    granted = gloves.subscribe(stream, devices=args.device, hands=args.hand or HANDS,
+                               rate_hz=args.rate, bones=False, cancelled=args.cancelled)
+    if args.cancelled and not granted.cancelled:
+        print("pandora: the app sends no cancelled counts (it is older than them)",
+              file=sys.stderr)
     printed = 0
     named: Set[str] = set()
     while not args.count or printed < args.count:
         try:
             message = gloves.read(stream, timeout=1.0)
         except TimeoutError:
-            # A glove with no profile is left out, which looks like silence.
-            if isinstance(gloves, Local):
-                for device in sorted(gloves.unprofiled - named):
-                    named.add(device)
-                    print(f"pandora: {device} is sending but has no profile, so it is left "
-                          f"out. Make one with: pandora calibrate --device {device} "
-                          "--hand left|right", file=sys.stderr)
+            message = None
+        if isinstance(gloves, Local):
+            for device in sorted(gloves.unprofiled - named):
+                named.add(device)
+                print(f"pandora: {_unprofiled(device, args)}. Make one with: pandora calibrate "
+                      f"--device {device} --hand left|right", file=sys.stderr)
+        if message is None:
             continue
-        print(_raw_line(message) if args.raw else _frame_line(message), flush=True)
+        print(_raw_line(message, args.cancelled) if args.raw else _frame_line(message),
+              flush=True)
         printed += 1
     return 0
+
+
+def _unprofiled(device: str, args: argparse.Namespace) -> str:
+    """What `watch --local` does with a glove that has no profile."""
+    if not args.raw:
+        # Left out, which looks like silence.
+        return (f"{device} is sending but is left out of the frames: a frame needs the "
+                "glove's profile, and it has none (--raw shows its raw readings without one)")
+    return (f"{device} has no profile, so its raw readings are shown as the {UNPROFILED_HAND} "
+            "hand's (a packet does not say which hand it is)"
+            + (", with no cancelled counts" if args.cancelled else ""))
 
 
 def _local(args: argparse.Namespace) -> Local:
     folder = args.profiles or default_profiles_dir()
     profiles = load_profiles(folder)
-    if not profiles:
-        raise PandoraError(f"no profile in {folder}. Make one with: pandora calibrate "
-                           "--hand left|right")
-    return open_receiver(profiles, port=args.receiver)
+    if not profiles and not args.raw:
+        raise PandoraError(f"no profile in {folder}, and frames need one. Make one with: "
+                           "pandora calibrate --hand left|right, or watch raw readings, which "
+                           "need none, with --raw")
+    return open_receiver(profiles, port=args.receiver, default_hand=UNPROFILED_HAND)
 
 
 def _calibrate(args: argparse.Namespace) -> int:
@@ -124,6 +155,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 help="print hands as they arrive")
     watch.add_argument("--raw", action="store_true",
                        help="the gloves' raw readings instead of finished hands")
+    watch.add_argument("--cancelled", action="store_true",
+                       help="with --raw: each finger's counts after earth-field cancellation "
+                            "instead of as the glove sent them")
     watch.add_argument("--hand", action="append", choices=HANDS, help="only this hand")
     watch.add_argument("--device", action="append", help="only this glove id (repeatable)")
     watch.add_argument("--rate", type=float, default=10.0,
@@ -131,7 +165,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     watch.add_argument("--count", type=int, default=0, help="stop after this many lines")
     watch.add_argument("--local", action="store_true",
                        help="read the receiver itself, with no app, using the profiles "
-                            "`pandora calibrate` wrote")
+                            "`pandora calibrate` wrote (--raw needs none)")
     watch.add_argument("--profiles", type=Path, metavar="DIR",
                        help=f"with --local: the profiles folder (default "
                             f"{default_profiles_dir()})")
@@ -176,6 +210,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     flash.add_argument("--verbose", action="store_true",
                        help="also print every line the receiver sends")
     args = parser.parse_args(argv)
+    if getattr(args, "cancelled", False) and not args.raw:
+        watch.error("--cancelled goes with --raw")
 
     try:
         if args.command == "calibrate":

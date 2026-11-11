@@ -565,6 +565,14 @@ pandora watch --hand right
 pandora watch --raw --rate 0 --count 100
 ```
 
+```bash
+pandora watch --raw --cancelled
+```
+
+With `--cancelled` each line shows the counts after earth-field cancellation
+instead of `hall` ([above](#counts-after-earth-field-cancellation)), and
+whether anything was cancelled; `cancelled -` for a reading that has none.
+
 Straight from the receiver, with the app closed and the profiles
 `pandora calibrate` wrote:
 
@@ -573,8 +581,12 @@ pandora watch --local
 ```
 
 `--profiles DIR` reads another folder, and `--receiver COM7` names the
-receiver's port when more than one is plugged in. A glove that is sending but
-has no profile is named on the error stream, with the command that makes one.
+receiver's port when more than one is plugged in. Frames need a profile: a
+glove that is sending but has none is left out of them and named on the error
+stream, with the command that makes one. Raw readings need none, so
+`pandora watch --local --raw` runs with no profile at all; a glove with no
+profile has its readings shown as the right hand's, and is named on the error
+stream.
 
 ### Calibrating a glove
 
