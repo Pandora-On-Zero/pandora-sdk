@@ -221,6 +221,15 @@ def test_an_app_that_hangs_up_has_its_code(app, gloves):
     assert lost.value.code == "app_closed"
 
 
+def test_a_client_whose_app_hung_up_has_ended_without_being_read(app, gloves):
+    assert gloves.ended is False
+
+    app.drop()
+
+    assert gloves.wait_ended(2.0) is True
+    assert gloves.end_error is not None and gloves.end_error.code == "app_closed"
+
+
 def test_reading_a_closed_client_has_its_code(gloves):
     gloves.close()
 

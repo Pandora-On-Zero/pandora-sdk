@@ -153,6 +153,28 @@ class Source:
 
     # ── for the reader ───────────────────────────────────────────────────
 
+    @property
+    def ended(self) -> bool:
+        """Whether this source has ended (closed, or lost: the app went away,
+        the receiver was unplugged, a callback raised), without waiting. For
+        a program that takes every message through on() and reads nothing."""
+        with self._changed:
+            return self._closed or self._ended
+
+    def wait_ended(self, timeout: Optional[float] = None) -> bool:
+        """Wait until this source has ended, *timeout* seconds at most (None
+        for as long as it takes); whether it has. end_error then says why."""
+        with self._changed:
+            return self._changed.wait_for(lambda: self._closed or self._ended, timeout)
+
+    @property
+    def end_error(self) -> Optional[Disconnected]:
+        """Why this source ended, as the Disconnected reading it would raise
+        (its code, and the error that ended it as __cause__); None while it
+        runs."""
+        with self._changed:
+            return self._disconnected() if self._closed or self._ended else None
+
     def on(self, stream: str, callback: Optional[Callable[[Any], object]]) -> None:
         """Call *callback* with each message of *stream* as it arrives,
         instead of queueing it; None goes back to queueing. For a program

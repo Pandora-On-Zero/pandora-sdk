@@ -329,6 +329,34 @@ def test_a_callback_that_raised_has_its_code_and_its_error_as_the_cause(link, gl
     assert isinstance(lost.value.__cause__, ValueError)
 
 
+# ── knowing it ended without reading ─────────────────────────────────────────
+
+def test_a_running_source_has_not_ended(gloves):
+    assert gloves.ended is False
+    assert gloves.wait_ended(0.05) is False
+    assert gloves.end_error is None
+
+
+def test_a_source_whose_receiver_was_unplugged_has_ended_and_says_why(link, gloves):
+    gloves.on("raw", lambda reading: None)
+    gloves.subscribe("raw")
+
+    link.unplugged = True
+
+    assert gloves.wait_ended(2.0) is True
+    assert gloves.ended is True
+    error = gloves.end_error
+    assert isinstance(error, pandora_sdk.Disconnected) and error.code == "unplugged"
+
+
+def test_a_closed_source_has_ended(link, clock):
+    opened = pandora_sdk.Local(PROFILES, link=link, defaults={}, clock=clock)
+    opened.close()
+
+    assert opened.ended and opened.wait_ended(0) is True
+    assert opened.end_error is not None and opened.end_error.code == "closed"
+
+
 def test_without_the_pipelines_default_files_it_refuses_to_guess(link, monkeypatch):
     """A pandora-core from before it carried them; hands made without them
     would be wrong, silently."""

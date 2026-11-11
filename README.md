@@ -212,6 +212,23 @@ with pandora_sdk.open_receiver() as gloves:
   `Disconnected` saying what your function raised.
 - It works the same through the app (`connect()`) and without it.
 
+A program that takes everything through callbacks never reads, so a read
+cannot tell it that the source has ended. Ask instead:
+
+```python
+while not gloves.wait_ended(0.5):        # True once it has ended; False after the wait
+    update_status()
+error = gloves.end_error                 # the Disconnected a read would raise now
+if error.code == "unplugged":
+    ...
+```
+
+| | |
+| --- | --- |
+| `gloves.ended` | Whether the source has ended (closed, or lost), without waiting |
+| `gloves.wait_ended(timeout)` | Waits up to `timeout` seconds (`None` for ever) for the end; whether it came |
+| `gloves.end_error` | Why it ended, as a `Disconnected` with its [code](#when-things-go-wrong); `None` while it runs |
+
 With `open_receiver()` and only `raw` subscribed, as here, no hand is made at
 all: see [Raw only](#raw-only).
 
