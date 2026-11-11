@@ -15,7 +15,8 @@ The clock is the glove's own (its packets' timestamps), so a countdown stops
 while the glove is out of range and nothing is captured from old data.
 
 A profile is good for one Hall range, and open_receiver() sends a glove
-nothing, so the range it will meet is the one a glove powers up in. The run
+nothing unless asked, so the range it will meet is the one a glove powers up
+in. The run
 therefore starts by resetting every Hall sensor to its power-up settings, and
 the profile records that range. The glove does not report back, so this is
 what it was told, not what it confirmed.
