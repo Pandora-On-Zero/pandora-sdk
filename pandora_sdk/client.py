@@ -121,7 +121,7 @@ class Client(Source):
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
-                  bones: bool = True, keys: Sequence[str] = ("*",),
+                  bones: bool = True, keys: Sequence[str] = ("*",), cancelled: bool = False,
                   timeout: Optional[float] = None) -> Subscription:
         """Ask for a stream: "frames" (finished hands), "raw" (what the
         glove sent) or "debug" (values from inside the pipeline). Returns
@@ -131,11 +131,15 @@ class Client(Source):
         hand. *rate_hz* is messages a second per glove at most, 0 for every
         one. *bones* (frames only) is whether each frame carries the 31-bone
         skeleton, which is most of its size. *keys* (debug only) are glob
-        patterns over the value names to send. Asking again for the same
-        stream replaces the earlier subscription.
+        patterns over the value names to send. *cancelled* (raw only) adds
+        to each Raw the counts the pipeline normalised, after earth-field
+        cancellation (hall_cancelled, thumb_distal_cancelled,
+        earth_cancelled); an app without the "raw_cancelled" capability
+        grants the subscription with cancelled off and sends none. Asking
+        again for the same stream replaces the earlier subscription.
         """
         wanted = Subscription(stream, None if devices is None else tuple(devices), tuple(hands),
-                              float(rate_hz), bones, tuple(keys))
+                              float(rate_hz), bones, tuple(keys), cancelled)
         reply = self._request(wanted.to_message(), "subscribed", timeout, stream=stream)
         return Subscription.from_message(reply)
 

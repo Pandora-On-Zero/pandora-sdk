@@ -16,11 +16,12 @@ pushes each glove's packets through that glove's own pipeline, and commands
 are written to the same port.
 
 A glove's pipeline runs only while a frames or debug subscription includes
-it; with raw alone, its packets make the raw message and nothing else. Its
-first packet still goes through a pipeline, which loads the profile that
-calibration() reads. A pipeline that missed packets starts again as a new one
-at the next packet it is wanted for, so its smoothing begins there, as on a
-glove's first packet.
+it, or a raw one with cancelled (the counts after earth-field cancellation
+exist only once the pipeline has had the packet); with plain raw alone, its
+packets make the raw message and nothing else. Its first packet still goes
+through a pipeline, which loads the profile that calibration() reads. A
+pipeline that missed packets starts again as a new one at the next packet it
+is wanted for, so its smoothing begins there, as on a glove's first packet.
 
 Each glove needs a profile: its hand and the calibration it carries. `pandora
 calibrate` (pandora_sdk/calibrate.py) writes one, into default_profiles_dir()
@@ -62,7 +63,7 @@ from pandora_sdk.source import CallbackFailed, ConnectionFailed, PandoraError, S
 SILENT_AFTER_S = 2.0
 
 # The streams that need a hand made: a glove's pipeline runs only while one of
-# them is subscribed for it.
+# them, or raw with cancelled (_runs_pipeline), is subscribed for it.
 HAND_STREAMS = ("frames", "debug")
 
 Profiles = Union[str, Path, Mapping[str, Union[Profile, Mapping[str, Any]]]]
@@ -214,7 +215,7 @@ class Local(Source):
         self._ranges: Dict[str, int] = {}
         self._new_range: Dict[str, int] = {}
         # Gloves whose pipeline has had every packet since it was built: the
-        # ones a frames or debug subscription has included since.
+        # ones a frames, debug or cancelled raw subscription has included since.
         self._fed: Set[str] = set()
         # Held by the reader through each packet, so a glove's pipeline is
         # never read half-changed (calibration()). Re-entrant: a callback
@@ -244,12 +245,15 @@ class Local(Source):
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
-                  bones: bool = True, keys: Sequence[str] = ("*",),
+                  bones: bool = True, keys: Sequence[str] = ("*",), cancelled: bool = False,
                   timeout: Optional[float] = None) -> Subscription:
         """Ask for a stream, as Client.subscribe does; nothing is delivered
-        before. Judged by the same code as the app's server."""
+        before. Judged by the same code as the app's server. Raw with
+        *cancelled* keeps each glove it includes going through its pipeline,
+        as frames do, and each of its messages is sent once the pipeline has
+        had the packet; hall is still the glove's own counts."""
         asked = Subscription(stream, None if devices is None else tuple(devices), tuple(hands),
-                             rate_hz, bones, tuple(keys))
+                             rate_hz, bones, tuple(keys), cancelled)
         granted = _judged(Subscription.from_message, asked.to_message())
         with self._changed:
             self._streams[granted.stream] = (granted, Pacer(granted.rate_hz))
@@ -373,12 +377,13 @@ class Local(Source):
             else:
                 profile = glove.profile
             # A hand is made only for a glove that a frames or debug
-            # subscription includes. A pipeline that missed packets starts
-            # again as a new Glove, as on the glove's first packet: its
-            # filters would otherwise pick up from a packet long gone.
+            # subscription includes, or a raw one with cancelled. A pipeline
+            # that missed packets starts again as a new Glove, as on the
+            # glove's first packet: its filters would otherwise pick up from
+            # a packet long gone.
             make_hand = any(wanted.wants(device, profile.hand)
                         for stream, (wanted, _) in self._streams.items()
-                        if stream in HAND_STREAMS)
+                        if _runs_pipeline(stream, wanted))
             fresh = (glove is None or retired is not None
                      or (make_hand and device not in self._fed))
             if glove is None or fresh:
@@ -407,8 +412,10 @@ class Local(Source):
         # The Frame, Raw and Debug a client of the app would get: through the
         # protocol's own encoding, so the two modes cannot differ.
         raw = None
+        cancelled = "raw" in due and due["raw"].cancelled
         if "raw" in due:
-            # Before the pipeline, which changes the packet in place.
+            # Before the pipeline, which changes the packet in place: hall is
+            # what the glove sent.
             raw = protocol.decode_raw(protocol.encode_raw(
                 packet, glove.hand, seq, time_us, glove.hall_range, glove.sensor_ranges,
                 wall_time_us))
@@ -417,7 +424,7 @@ class Local(Source):
             # A new Glove's first packet loads its profile into its stores,
             # which calibration() reads: before a callback can ask for it.
             frame = glove.push_decoded(packet)
-        if raw is not None:
+        if raw is not None and not cancelled:
             self._deliver("raw", raw)
         if not make_hand:
             return
@@ -425,6 +432,18 @@ class Local(Source):
         # not: its filters carry state from one to the next.
         if frame is None:
             frame = glove.push_decoded(packet)
+        if raw is not None and cancelled:
+            # The counts the pipeline normalised exist only now, after gap
+            # fill and earth-field cancellation changed the packet: read by
+            # the core's encode_raw, as the app's server reads them. The
+            # rest of the message stays the one made before.
+            after = protocol.decode_raw(protocol.encode_raw(
+                packet, glove.hand, seq, time_us, glove.hall_range, glove.sensor_ranges,
+                wall_time_us, cancelled=True))
+            self._deliver("raw", replace(
+                raw, hall_cancelled=after.hall_cancelled,
+                thumb_distal_cancelled=after.thumb_distal_cancelled,
+                earth_cancelled=after.earth_cancelled))
         if "frames" in due:
             self._deliver("frames", protocol.decode_frame(protocol.encode_frame(
                 frame, seq, time_us, due["frames"].bones, wall_time_us)))
@@ -462,6 +481,13 @@ def _judged(parse: Callable[[Dict[str, Any]], Any], message: Dict[str, Any]) -> 
         return parse(message)
     except ProtocolError as refused:
         raise ServerError(refused.code, str(refused)) from None
+
+
+def _runs_pipeline(stream: str, wanted: Subscription) -> bool:
+    """Whether a subscription to *stream* needs the gloves it includes to go
+    through their pipelines: frames and debug are made by it, and raw's
+    cancelled counts are the packet as it leaves it."""
+    return stream in HAND_STREAMS or (stream == "raw" and wanted.cancelled)
 
 
 def _hall_command(device: str, hall_range: int) -> bytes:

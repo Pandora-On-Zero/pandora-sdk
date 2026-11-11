@@ -17,7 +17,7 @@ from websockets.sync.server import serve
 
 HELLO = {"type": "hello", "protocol": 1, "server": "01glove-app", "version": "0.2.26",
          "capabilities": ["frames", "raw", "devices", "haptics", "hall_range", "calibration",
-                          "debug"]}
+                          "debug", "raw_cancelled"]}
 
 DEVICES = {"type": "devices", "devices": [
     {"id": "NRF_GLOVE_E5D1", "hand": "right", "name": "Lab right", "connected": True},
@@ -52,6 +52,15 @@ RAW: Dict[str, Any] = {
     "buttons": {"trigger": False, "a": True, "b": False, "system": False, "power": False,
                 "stick": False},
     "joystick": [100, -200], "battery_pct": 87, "charging": False}
+
+# The keys a raw message also carries when the subscription said cancelled,
+# from the spec's second raw table: per finger the counts after earth-field
+# cancellation, shaped as hall, and whether any sensor was cancelled.
+CANCELLED: Dict[str, Any] = {
+    "hall_cancelled": [[[-1, 2, 3], [4, -5, 6]], [[7, 8, -9], [10, 11, 120]],
+                       [[13, 14, 15], [16, 17, 18]], [[19, 20, 21], [22, 23, 24]],
+                       [[25, 26, 27], [28, 29, 30]]],
+    "thumb_distal_cancelled": [31, -32, 33], "earth_cancelled": True}
 
 # One debug message, key by key from the spec's table, with the value names
 # it gives as examples.
@@ -90,6 +99,12 @@ def frame(**changes: Any) -> bytes:
 
 def raw(**changes: Any) -> bytes:
     return _pack({**RAW, **changes})
+
+
+def raw_cancelled(**changes: Any) -> bytes:
+    """RAW with the CANCELLED keys, as sent to a subscription that asked for
+    them, with *changes* to its keys."""
+    return _pack({**RAW, **CANCELLED, **changes})
 
 
 def debug(**changes: Any) -> bytes:
@@ -147,6 +162,14 @@ def _bad_hall_range(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _bad_subscribe(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The subscribe fields this stand-in checks; the others it grants as
+    asked."""
+    if not isinstance(message.get("cancelled", False), bool):
+        return error("bad_cancelled", "cancelled is true or false")
+    return None
+
+
 def _not_connected(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     connected = [d["id"] for d in DEVICES["devices"] if d["connected"]]
     if message["device"] not in connected:
@@ -191,12 +214,19 @@ class StandIn:
         if kind == "devices":
             return [DEVICES]
         if kind == "subscribe":
+            refused = _bad_subscribe(message)
+            if refused is not None:
+                return [refused]
             granted = {"stream": "frames", "hands": ["left", "right"], "rate_hz": 0, **message,
                        "type": "subscribed"}
             if granted["stream"] == "frames":
                 granted.setdefault("bones", True)
             if granted["stream"] == "debug":
                 granted.setdefault("keys", ["*"])
+            if granted["stream"] == "raw":
+                granted.setdefault("cancelled", False)
+            else:
+                granted.pop("cancelled", None)  # raw only
             return [granted]
         if kind == "calibration":
             known = [d["id"] for d in DEVICES["devices"]]

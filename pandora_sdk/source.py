@@ -189,9 +189,11 @@ class Source:
 
     def subscribe(self, stream: str = "frames", *, devices: Optional[Sequence[str]] = None,
                   hands: Sequence[str] = protocol.HANDS, rate_hz: float = 0.0,
-                  bones: bool = True, keys: Sequence[str] = ("*",),
+                  bones: bool = True, keys: Sequence[str] = ("*",), cancelled: bool = False,
                   timeout: Optional[float] = None) -> Subscription:
-        """Ask for a stream; nothing is delivered before."""
+        """Ask for a stream; nothing is delivered before. *cancelled* (raw
+        only) adds each sensor's counts after earth-field cancellation to
+        every Raw: hall_cancelled, thumb_distal_cancelled, earth_cancelled."""
         raise NotImplementedError
 
     # ── commands for a glove ─────────────────────────────────────────────
