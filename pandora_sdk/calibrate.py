@@ -5,7 +5,7 @@ with no app, and write the profile open_receiver() reads.
     outcome = calibrate(link, hand="right")
     print(outcome.path)
 
-The run itself is pandora-core's (CalibrationSession, driven over the glove's
+The run itself is pandora-core-rs's (CalibrationSession, driven over the glove's
 packets by calibrate_packets): which steps there are, what each captures and
 how it went. This adds what a person at a terminal needs around it: which
 glove, each step and its countdown as text, a buzz on the back of the hand
@@ -29,21 +29,21 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
-from pandora_core import commands
-from pandora_core.calibration_session import CalibrationSession, Run, Step, calibrate_packets
-from pandora_core.glove import Glove, Profile
-from pandora_core.packet_decoder import GlovePacket
-from pandora_core.packet_layout import (
+from pandora_core_rs import commands
+from pandora_core_rs.calibration_session import CalibrationSession, Run, Step, calibrate_packets
+from pandora_core_rs.glove import Glove, Profile
+from pandora_core_rs.packet_decoder import GlovePacket
+from pandora_core_rs.packet_layout import (
     HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_DEFAULT_RANGE, HALL_TARGET_ALL,
     HAPTIC_BACKHAND_MOTOR, HAPTIC_MOTOR_COUNT,
 )
-from pandora_core.tuning import Tuning
+from pandora_core_rs.tuning import Tuning
 
 from pandora_sdk.local import (default_profiles_dir, link_failure, link_failure_code,
                                link_packets, load_profiles, save_profile, send_command)
 from pandora_sdk.source import Disconnected, PandoraError
 
-# The cue: the back-of-hand motor at full drive (pandora_core commands.haptic_rtp
+# The cue: the back-of-hand motor at full drive (pandora_core_rs commands.haptic_rtp
 # takes 1 to 127), for this long when a step starts and when the run is over.
 CUE_AMPLITUDE = 127
 CUE_MS = 150

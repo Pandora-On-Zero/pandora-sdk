@@ -1,4 +1,4 @@
-"""A client for the 01 Glove app's wire protocol (PROTOCOL.md in pandora-core).
+"""A client for the 01 Glove app's wire protocol (PROTOCOL.md in the Pandora repository).
 
     import pandora_sdk
 
@@ -7,7 +7,7 @@
         for hand in gloves.frames():
             print(hand.angles_deg)
 
-The messages are pandora_core.protocol's; this file only opens the socket,
+The messages are pandora_core_rs.protocol's; this file only opens the socket,
 sends requests (subscriptions, commands for a glove, calibration) and sorts
 what arrives. One background thread reads the socket; keeping and
 handing out the messages is Source's (pandora_sdk/source.py), shared with the
@@ -24,11 +24,11 @@ from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple, Union
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect as _open_socket
 
-from pandora_core import protocol
-from pandora_core.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
-                                        HALL_DEFAULT_RANGE, HALL_TARGET_ALL)
-from pandora_core.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
-                                   ProtocolError, Subscription)
+from pandora_core_rs import protocol
+from pandora_core_rs.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
+                                           HALL_DEFAULT_RANGE, HALL_TARGET_ALL)
+from pandora_core_rs.protocol import (DEFAULT_PORT, Calibration, Device, HallRange, Haptics,
+                                      ProtocolError, Subscription)
 
 from pandora_sdk.source import (CallbackFailed, ConnectionFailed, Disconnected, PandoraError,
                                 ServerError, Source)

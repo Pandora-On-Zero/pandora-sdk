@@ -5,8 +5,8 @@ import threading
 import time
 from typing import List, Tuple
 
-from pandora_core.packet_layout import TRACKING_FORMAT
-from pandora_core.serial_framing import decode_frame, encode_frame
+from pandora_core_rs.packet_layout import TRACKING_FORMAT
+from pandora_core_rs.serial_framing import decode_frame, encode_frame
 
 
 def packet_line(device: str, glove_ms: int = 1000, hall: int = 100) -> bytes:

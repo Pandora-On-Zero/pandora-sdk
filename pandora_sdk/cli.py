@@ -21,8 +21,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Sequence, Set
 
-from pandora_core.calibration_session import Run
-from pandora_core.protocol import DEFAULT_PORT, HANDS, Frame, ProtocolError, Raw
+from pandora_core_rs.calibration_session import RUNS, Run
+from pandora_core_rs.protocol import DEFAULT_PORT, HANDS, Frame, ProtocolError, Raw
 
 from pandora_sdk import firmware
 from pandora_sdk.calibrate import calibrate
@@ -120,7 +120,7 @@ def _calibrate(args: argparse.Namespace) -> int:
     try:
         outcome = calibrate(
             link, hand=args.hand, device=args.device, out=args.out,
-            run=Run[args.run.upper()], hold_s=args.hold, ready_s=args.ready,
+            run=getattr(Run, args.run.upper()), hold_s=args.hold, ready_s=args.ready,
             haptics=not args.no_haptics, name=args.name,
             say=lambda text: print(text, flush=True))
     except KeyboardInterrupt:
@@ -180,7 +180,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                      help="the hand the glove is worn on; needed the first time, then taken "
                           "from the glove's profile")
     cal.add_argument("--device", help="the glove's id, when more than one is sending")
-    cal.add_argument("--run", choices=[run.name.lower() for run in Run], default="full",
+    cal.add_argument("--run", choices=[run.name.lower() for run in RUNS], default="full",
                      help="what to calibrate (default full: curl range, and the splay zero "
                           "on a glove with finger IMUs)")
     cal.add_argument("--hold", type=float, default=3.0,
@@ -234,7 +234,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _speak_utf8() -> None:
-    """pandora-core's firmware update prints emoji, from threads of its own,
+    """pandora-core-rs's firmware update prints emoji, from threads of its own,
     which a Windows console's code page cannot always show: replace what it
     cannot, rather than let the print fail."""
     for stream in (sys.stdout, sys.stderr):

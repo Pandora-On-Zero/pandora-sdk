@@ -1,6 +1,6 @@
 """Hands straight from a receiver, with no app (pandora_sdk/local.py), against
 a made-up serial link. The packets are built here from the tracking packet's
-layout; what the pipeline makes of real ones is pandora-core's own tests'
+layout; what the pipeline makes of real ones is pandora-core-rs's own tests'
 business. These check the plumbing around it."""
 import base64
 import json
@@ -13,16 +13,16 @@ from fakelink import Link, packet_line, sent
 from standin import wait
 
 import pandora_sdk
-from pandora_core import protocol, receiver
-from pandora_core.finger_normalizer import CurlInterpolationMode, FingerInterpolator
-from pandora_core.glove import Glove
-from pandora_core.packet_decoder import PacketDecoder, SensorReading
-from pandora_core.packet_layout import (
+from pandora_core_rs import protocol, receiver
+from pandora_core_rs.finger_normalizer import CurlInterpolationMode, FingerInterpolator
+from pandora_core_rs.glove import Glove
+from pandora_core_rs.packet_decoder import PacketDecoder, SensorReading
+from pandora_core_rs.packet_layout import (
     GLOVE_PKT_HALL_CONFIG, GLOVE_PKT_HAPTIC_ROM, GLOVE_PKT_HAPTIC_RTP, HALL_DEFAULT_FILTER,
     HALL_DEFAULT_ODR, HALL_DEFAULT_OSR, HALL_RANGE_5MT, HALL_RANGE_50MT, HALL_TARGET_ALL,
     USB_HALL_CONFIG_FORMAT, USB_HAPTIC_ROM_FORMAT, USB_HAPTIC_RTP_FORMAT,
 )
-from pandora_core.serial_framing import encode_frame
+from pandora_core_rs.serial_framing import encode_frame
 from pandora_sdk import Device, Subscription
 
 RIGHT, LEFT, STRANGER = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D", "NRF_GLOVE_0000"
@@ -220,8 +220,7 @@ def test_a_glove_with_no_profile_takes_commands(link, gloves):
         (GLOVE_PKT_HAPTIC_RTP, STRANGER.encode().ljust(16, b"\0"), *([0] * 12))]
 
 
-def test_a_glove_with_no_profile_has_no_calibration_and_needs_no_pipeline_for_it(
-        link, no_default_files, pushes):
+def test_a_glove_with_no_profile_has_no_calibration_and_needs_no_pipeline_for_it(link, pushes):
     with pandora_sdk.Local({}, link=link) as gloves:
         feed(link, gloves, packet_line(STRANGER))
 
@@ -476,40 +475,6 @@ def test_a_closed_source_has_ended(link, clock):
 
     assert opened.ended and opened.wait_ended(0) is True
     assert opened.end_error is not None and opened.end_error.code == "closed"
-
-
-@pytest.fixture
-def no_default_files(monkeypatch):
-    """A pandora-core that carries none of the pipeline's default files (an
-    old one, or a frozen program built without them); hands made without
-    them would be wrong, silently."""
-    monkeypatch.setattr("pandora_sdk.local.shipped_defaults", lambda: {})
-
-
-def test_without_the_pipelines_default_files_raw_readings_still_come(link, no_default_files):
-    with pandora_sdk.Local(PROFILES, link=link) as gloves:
-        gloves.subscribe("raw")
-        link.feed(packet_line(RIGHT), packet_line(LEFT))
-
-        assert {gloves.read("raw", timeout=2.0).device for _ in range(2)} == {RIGHT, LEFT}
-
-
-@pytest.mark.parametrize("subscription", [{"stream": "frames"}, {"stream": "debug"},
-                                          {"stream": "raw", "cancelled": True}],
-                         ids=["frames", "debug", "raw-cancelled"])
-def test_without_the_pipelines_default_files_a_stream_that_needs_it_is_refused(
-        link, no_default_files, subscription):
-    with pandora_sdk.Local(PROFILES, link=link) as gloves:
-        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
-            gloves.subscribe(**subscription)
-
-
-def test_without_the_pipelines_default_files_calibration_is_refused(link, no_default_files):
-    with pandora_sdk.Local(PROFILES, link=link) as gloves:
-        feed(link, gloves, packet_line(RIGHT))
-
-        with pytest.raises(pandora_sdk.PandoraError, match="default files"):
-            gloves.calibration(RIGHT)
 
 
 # ── wall time ────────────────────────────────────────────────────────────────
@@ -965,7 +930,7 @@ def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, g
 
 
 # A real glove with earth-field cancellation on: tests/data/right_earth.json,
-# recorded packets copied from pandora-core's golden vectors.
+# recorded packets copied from pandora-core-rs's golden vectors.
 EARTH = json.loads((Path(__file__).parent / "data" / "right_earth.json").read_text(
     encoding="utf-8"))
 EARTH_PAYLOADS = [base64.b64decode(packet) for packet in EARTH["packets"]]

@@ -4,7 +4,7 @@ the air, with no app.
     pandora update-firmware receiver dfu_application.zip
     pandora update-firmware glove build/ --device NRF_GLOVE_E5D1
 
-What `tools/ota_flash.py flash` in the app does, over the same pandora-core
+What `tools/ota_flash.py flash` in the app does, over the same pandora-core-rs
 code: the image is found and checked by firmware_package.resolve_image, the
 port is opened and read by receiver.ReceiverLink, and the update is
 firmware_update's FirmwareUpdater driven by wait_version and run_update. This
@@ -20,9 +20,9 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from pandora_core.firmware_package import DONGLE, GLOVE, resolve_image
-from pandora_core.firmware_update import DfuTarget, FirmwareUpdater, run_update, wait_version
-from pandora_core.receiver import ReceiverLink, is_port_locked, streaming_gloves
+from pandora_core_rs.firmware_package import DONGLE, GLOVE, resolve_image
+from pandora_core_rs.firmware_update import DfuTarget, FirmwareUpdater, run_update, wait_version
+from pandora_core_rs.receiver import ReceiverLink, is_port_locked, streaming_gloves
 
 from pandora_sdk.local import receiver_port
 from pandora_sdk.source import ConnectionFailed, PandoraError

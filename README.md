@@ -25,25 +25,20 @@ see [Not here yet](#not-here-yet).
 
 ## Installing
 
-`pandora-sdk` uses `pandora-core` for the message format, and `pandora-core`
-lives inside the private `Pandora-On-Zero/Pandora` repository. So installing
-needs git, and a GitHub login that can read that repository.
+`pandora-sdk` uses `pandora-core-rs`, the Python binding of the 01 Glove's
+Rust core, for the message format and the hand pipeline. It comes as a
+prebuilt wheel from a public release of `Pandora-On-Zero/Pandora-Release`
+(Windows x86_64, Linux x86_64 and aarch64 with glibc 2.28+, macOS); elsewhere
+there is no wheel and nothing is installed for it. `pandora-sdk` itself lives
+in a private repository, so installing needs git and a GitHub login that can
+read it.
 
 ```bash
 pip install git+https://github.com/Pandora-On-Zero/pandora-sdk.git
 ```
 
-On Windows, run this once first. The Pandora repository holds a few files
-whose paths are longer than Windows allows by default, and without it pip's
-download of that repository fails with "Filename too long":
-
-```bash
-git config --global core.longpaths true
-```
-
-Python 3.11 or newer. It brings in `websockets`, `msgpack`, `numpy` (1.26 or
-newer) and `pyserial`: `pandora-core` with its `pipeline` extra (numpy, for
-making hands) and its `serial` extra (pyserial, for the receiver).
+Python 3.11 or newer. It brings in `pandora-core-rs`, `websockets` and
+`pyserial` (for the receiver); no numpy.
 
 To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
 
@@ -51,24 +46,11 @@ To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
 pip install --force-reinstall git+https://github.com/Pandora-On-Zero/pandora-sdk.git
 ```
 
-Without it pip may keep the `pandora-core` it already has, even with
+Without it pip may keep the `pandora-sdk` it already has, even with
 `--upgrade`: pip judges an installed package by its version number, not by the
-commit it came from, and keeps one whose version is the one asked for. That is
-why a move of the pin normally raises the core's version (see
-[Working on it](#working-on-it)); `--force-reinstall` makes sure either way.
-The same goes for `pandora-sdk` in a program that pins it to a commit, which
-is why its version goes up with every change a program may depend on.
-This version needs `pandora-core` 0.7.1 (commit `9cd9df0`). 0.7.1 fixes hands
-made by a second `Glove` in one process: it reused the skeleton of the first
-whenever their bone overrides differed, so its curls could be off by a few
-hundredths. (0.7.0 had sorted the core into layers: its base install is only
-the wire layer (msgpack), and numpy, which it needs only to make hands, is its
-`pipeline` extra with a floor of 1.26 instead of 2, so `pandora-sdk` installs
-next to a program that pins numpy 1.26. 0.4.0 had added the battery voltage
-and two power flags to raw readings, 0.3.0
-[the counts after earth-field cancellation](#counts-after-earth-field-cancellation).)
-An install that has an older core moves to it with the `--force-reinstall`
-above.
+commit it came from. That is why this library's version goes up with every
+change a program may depend on (see [Working on it](#working-on-it)).
+This version needs `pandora-core-rs` 0.1.0 (release `core-rs-v0.1.0`).
 
 ## Before you connect
 
@@ -331,7 +313,7 @@ gloves.send_hall_config(glove, hall_range=1, target="Index/Prox")    # one senso
 | `reset` | `False` | Back to the firmware's defaults |
 | `hall_range` | `0` | `0` is +-5 mT, `1` is +-50 mT |
 | `osr` | `1` | Oversampling: `0` low, `1` high |
-| `odr` | `4` (200 Hz) | Output rate, an index into `pandora_core.packet_layout.HALL_ODR_HZ` (10, 15, 50, 100, 200, 500, 700, 1000, 1400 Hz) |
+| `odr` | `4` (200 Hz) | Output rate, an index into `pandora_core_rs.packet_layout.HALL_ODR_HZ` (10, 15, 50, 100, 200, 500, 700, 1000, 1400 Hz) |
 | `filter` | `3` | Filtering, `0` (least) to `7` (most) |
 | `target` | every sensor (`0xFF`) | One sensor, by its id or its key: `"Thumb/Prox"`, `"Thumb/Meta"`, `"Thumb/Distal"`, `"Index/Prox"`, `"Index/Meta"`, the same for `Middle`, `Ring` and `Pinky`, or `"Reference"` |
 
@@ -399,7 +381,7 @@ Profiles are files, one `<glove id>.json` per glove, in the folder
 `.pandora/profiles` in your home folder (`pandora_sdk.default_profiles_dir()`).
 `open_receiver()` reads that folder; `open_receiver("some/folder")` reads
 another, and a dict of glove id to profile works too. A profile is the JSON
-form of `pandora_core.glove.Profile`, the same thing a hand recording stores
+form of `pandora_core_rs.glove.Profile`, the same thing a hand recording stores
 per glove. A profile belongs to a glove and the hand wearing it: for another
 wearer, calibrate again, or into another folder (`--out`).
 
@@ -445,7 +427,7 @@ print(gloves.packets, gloves.bad_frames)                  # tracking packets, da
   port was opened) is not passed on.
 - `gloves.bad_frames` counts the binary frames that failed their COBS or CRC
   check, beside `gloves.packets`, the tracking packets read. Each frame is
-  told apart by `pandora-core`'s own framing code, not a copy of it.
+  told apart by `pandora-core-rs`'s own framing code, not a copy of it.
 - Only without the app: the app keeps the receiver's lines to itself. A line
   callback is not a stream: the lines belong to no glove, so they have no
   `latest()`, no subscription and no queue (put them on a `queue.Queue` from
@@ -492,12 +474,10 @@ one glove leaves the others raw only.
   packet. `calibration()` and `latest_calibration()` build one when asked,
   loading the glove's profile (and its range) with its newest packet, a
   millisecond or a few once; `set_hall_range` works as ever.
-- The pipeline's default files (`hall_reference.default.json` and the others
-  `pandora-core` ships, or `defaults=`) are read only when the first pipeline
-  is wanted. Without them, raw-only reading works; subscribing to frames,
-  debug or cancelled raw, or asking for `calibration()`, raises
-  `PandoraError` instead of making wrong hands. A frozen program (PyInstaller)
-  that only reads raw needs no `--collect-data pandora_core`.
+- The pipeline's default files (`hall_reference.default.json` and the others,
+  compiled into `pandora-core-rs`, or `defaults=`) are parsed only when the
+  first pipeline is wanted. A frozen program (PyInstaller) needs no
+  `--collect-data` for them.
 - **Subscribing to frames (or to raw with `cancelled`) later starts that
   glove's pipeline afresh at the next packet**, as when the glove is switched
   on: its smoothing and other filters, earth-field cancellation's among them,
@@ -611,7 +591,7 @@ a countdown), and writes `<glove id>.json` into the profiles folder. A full run
 is hand open, then a fist, three seconds each. A glove with finger IMUs adds
 fingers together between the two and ends on circling each finger in turn,
 about half a minute in all. The steps and what each captures are
-`pandora-core`'s, the same ones the app's Calibration tab runs. Their text was
+`pandora-core-rs`'s, the same ones the app's Calibration tab runs. Their text was
 written for that tab, so it mentions "the hands shown"; there are none here.
 
 | Option | Default | Meaning |
@@ -677,7 +657,7 @@ It exits with 0 once the new image is confirmed, 1 when the update failed or
 nothing was flashed, and 130 after Ctrl+C. While the app holds the receiver it
 refuses to start, and says to close the app.
 
-The update itself is `pandora-core`'s (`firmware_update.py`), the one the
+The update itself is `pandora-core-rs`'s (`firmware_update`), the one the
 app's Firmware tab and its `tools/ota_flash.py flash` run, and this takes
 the same arguments as that tool, with the port as `--receiver`.
 
@@ -693,33 +673,25 @@ python -m pytest
 
 The tests run the client against a stand-in server, `tests/standin.py`, that
 was typed out from the protocol's specification and imports nothing of
-`pandora-core`. The client decodes with `pandora-core`, so a mistake in that
-package's message code shows up here as a failing test and is not shared by
-both ends. Reading the receiver, sending to a glove and calibrating are
+`pandora-core-rs`. The client decodes with `pandora-core-rs`, so a mistake in
+that package's message code shows up here as a failing test and is not shared
+by both ends. Reading the receiver, sending to a glove and calibrating are
 tested against a made-up serial port, `tests/fakelink.py`, fed packets built
 from the tracking packet's layout; the firmware update against a made-up
 receiver that answers the DFU protocol (`tests/test_firmware.py`). The counts
 after earth-field cancellation are also tested on 40 packets recorded from a
-glove with cancellation on, copied from `pandora-core`'s golden vectors
-(`tests/data/right_earth.json`). No test
+glove with cancellation on, copied from the Pandora repository's golden
+vectors (`tests/data/right_earth.json`). No test
 can open a real port (`tests/conftest.py` refuses it), and every test gets a
 temporary home folder, so none reads or writes your `.pandora/profiles`.
 
-`pyproject.toml` pins `pandora-core` to one commit of the Pandora repository.
-Move the pin when the core gains something this library should use. **The
-commit you pin must carry a higher `pandora-core` version** (its
-`pandora-core/pyproject.toml`) than the one pinned before: pip keeps an
-installed core whose version matches, whatever commit it came from, so a pin
-to a new commit with the same version leaves people on the old core. The pin
-is at 0.7.1 now (`9cd9df0`), with the core's `pipeline` and `serial` extras;
-its `ble` extra (bleak) stays out until this library uses Bluetooth. Then
-install again with
-`pip install --force-reinstall -e ".[dev]"`, or, to replace only the core:
-
-```bash
-GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true \
-  pip install --force-reinstall --no-deps "pandora-core[pipeline,serial] @ git+https://github.com/Pandora-On-Zero/Pandora.git@9cd9df028d833058c8c6a455f1de11b273279413#subdirectory=pandora-core"
-```
+`pyproject.toml` pins `pandora-core-rs` to one release of
+`Pandora-On-Zero/Pandora-Release`: one direct reference per platform, each
+with its marker and its wheel's `#sha256=`, copied from that release's notes
+(`pandora-core-rs/README.md` in the Pandora repository, "Installing the Python
+binding"). Move the pin when the core gains something this library should use;
+every release has a new version, so all four lines change. Then install again
+with `pip install --force-reinstall -e ".[dev]"`.
 
 **This library's own `version`** (`pyproject.toml`) follows the same rule as
 the core's: it goes up in the same change as anything a program may depend on
@@ -768,5 +740,4 @@ with a second pull request (`git cherry-pick`).
   `tools/ota_flash.py version` does it.
 - An `asyncio` client. This one is blocking, with one background thread.
 - A licence, and a release on PyPI. Both wait for the repository going public,
-  which also needs `pandora-core` to be installable by people outside the
-  organisation.
+  `pandora-core-rs`'s wheels are public already.

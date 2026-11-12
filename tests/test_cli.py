@@ -6,7 +6,7 @@ from fakelink import Link, packet_line
 from standin import frame, raw, raw_cancelled
 
 import pandora_sdk
-from pandora_core import receiver
+from pandora_core_rs import receiver
 from pandora_sdk.cli import main
 
 RIGHT, LEFT = "NRF_GLOVE_E5D1", "NRF_GLOVE_A48D"

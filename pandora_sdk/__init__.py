@@ -12,12 +12,12 @@ adapter switched on. open_receiver() reads the receiver itself, with no app,
 from the profiles the `pandora calibrate` command writes
 (pandora_sdk/calibrate.py). Both give the same Frame, Raw and Debug, take the
 same commands for a glove (haptics, Hall range) and give its Calibration;
-what they hold is in pandora-core's PROTOCOL.md.
+what they hold is in PROTOCOL.md (Pandora repository).
 """
-from pandora_core.glove import Profile
-from pandora_core.protocol import (DEFAULT_PORT, Calibration, Debug, Device, Frame,
-                                   ProtocolError, Raw, Subscription)
-from pandora_core.receiver import ReceiverPort
+from pandora_core_rs.glove import Profile
+from pandora_core_rs.protocol import (DEFAULT_PORT, Calibration, Debug, Device, Frame,
+                                      ProtocolError, Raw, Subscription)
+from pandora_core_rs.receiver import ReceiverPort
 
 from pandora_sdk.client import Client, Server, connect
 from pandora_sdk.local import (Local, default_profiles_dir, list_receivers, load_profiles,

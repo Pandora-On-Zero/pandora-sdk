@@ -1,5 +1,5 @@
 """The client against a stand-in server that was written from the spec
-(tests/standin.py), so these also check pandora_core's decoding against
+(tests/standin.py), so these also check pandora_core_rs's decoding against
 PROTOCOL.md."""
 import threading
 from typing import Any, cast
