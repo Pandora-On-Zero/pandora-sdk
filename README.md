@@ -50,7 +50,7 @@ Without it pip may keep the `pandora-sdk` it already has, even with
 `--upgrade`: pip judges an installed package by its version number, not by the
 commit it came from. That is why this library's version goes up with every
 change a program may depend on (see [Working on it](#working-on-it)).
-This version needs `pandora-core-rs` 0.1.0 (release `core-rs-v0.1.0`).
+This version needs `pandora-core-rs` 0.2.0 (release `core-rs-v0.2.0`).
 
 ## Before you connect
 
@@ -125,7 +125,7 @@ pinky:
 | `wall_time_us` | The same instant on the wall clock, microseconds since 1970 (UTC), for lining frames up with another recording; `None` from an app older than this field. Measure intervals with `time_us`: the wall clock can be set back |
 
 The exact meaning of every field is the protocol's specification,
-`pandora-core/PROTOCOL.md` in the Pandora repository.
+`pandora-core-rs/PROTOCOL.md` in the Pandora repository.
 
 ### Raw readings
 
