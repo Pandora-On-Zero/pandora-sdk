@@ -14,10 +14,10 @@ dependencies = [
     # The message format and the pipeline are pandora-core-rs's (the Rust core's
     # Python binding), not a copy of them: one prebuilt wheel per platform from a
     # Pandora-Release release; see README, "Installing".
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.0/pandora_core_rs-0.2.0-cp311-abi3-win_amd64.whl#sha256=3481563db74843577baf2fd0e6a1b38e40aabfe060381f6b48b220781584bb8e ; sys_platform == 'win32' and platform_machine == 'AMD64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.0/pandora_core_rs-0.2.0-cp311-abi3-manylinux_2_28_x86_64.whl#sha256=868696e348b1e90fe1405688ceee47afe17842a78eb1c31ae2f64346d5475c81 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.0/pandora_core_rs-0.2.0-cp311-abi3-manylinux_2_28_aarch64.whl#sha256=3e646b677becd18ba971e76ba786920ef7d18cfeac3c9b8adb3139cdf5e8cfb3 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.0/pandora_core_rs-0.2.0-cp311-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl#sha256=a042d51551546a22b3689d335560abbc0c3cdab53a4b3d24b44e683230d70a2c ; sys_platform == 'darwin'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-win_amd64.whl#sha256=89960215e0e0ff4640ea9143e59b941cfb940db382f6a102bb0c17deffe9c417 ; sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-manylinux_2_28_x86_64.whl#sha256=b74978c783fedec3505720b3930e50c383b2a8cd94cb8c078055e208b863d4d9 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-manylinux_2_28_aarch64.whl#sha256=2df9b3747eaa6624bf754bca7f5222e564f37055eaf7c7610b3aafb15f259b10 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl#sha256=7a0e9db584b4d760e6887ed32cacadacf9d2dcf6cef581f2beb7e05555f96a9e ; sys_platform == 'darwin'",
     # The receiver's port (pandora_core_rs.receiver).
     "pyserial>=3.5",
     "websockets>=13",

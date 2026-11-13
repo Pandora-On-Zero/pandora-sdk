@@ -46,7 +46,7 @@ branch or a commit instead of a tag works too, but then add
 version number, not by the commit it came from, so without it pip may keep
 the `pandora-sdk` it already has. That is why this library's version goes up
 with every change a program may depend on (see [Working on it](#working-on-it)).
-This version needs `pandora-core-rs` 0.2.0 (release `core-rs-v0.2.0`).
+This version needs `pandora-core-rs` 0.2.1 (release `core-rs-v0.2.1`).
 
 ## Before you connect
 
