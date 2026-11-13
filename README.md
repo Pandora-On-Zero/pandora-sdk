@@ -37,7 +37,7 @@ read it.
 pip install git+https://github.com/Pandora-On-Zero/pandora-sdk.git
 ```
 
-Python 3.11 or newer. It brings in `pandora-core-rs`, `websockets` and
+Python 3.10 or newer. It brings in `pandora-core-rs`, `websockets` and
 `pyserial` (for the receiver); no numpy.
 
 To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
