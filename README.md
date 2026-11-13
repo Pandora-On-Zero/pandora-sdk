@@ -450,7 +450,7 @@ gloves = pandora_sdk.Local(link=port)             # closing gloves closes the po
 | Call | Gives |
 | --- | --- |
 | `list_receivers()` | The receivers plugged in, as `ReceiverPort` (`device`, the port to open; `serial_number`, the receiver's stable identity, `""` when it reports none; `product`), sorted by port name in number order |
-| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use` or `open_failed` when the port will not open |
+| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use`, `no_access` or `open_failed` when the port will not open |
 
 `Local(link=...)` reads any object with the port's `read`, `in_waiting`,
 `write` and `close`, which is also how to feed it a recording or a simulator.
@@ -458,6 +458,43 @@ gloves = pandora_sdk.Local(link=port)             # closing gloves closes the po
 One thread runs every glove's pipeline. On the PC this was written on, a
 packet takes about a millisecond with both streams and the skeleton on, and a
 glove sends 200 a second.
+
+#### Linux
+
+- **Which port.** The receiver is found by its USB ids among the serial
+  ports pyserial lists, which under the kernel's own `cdc_acm` driver is a
+  `/dev/ttyACM*`. With WCH's `ch343` kernel driver installed instead, the
+  port is a `/dev/ttyCH343USB*`, which pyserial does not list: name it
+  (`open_receiver(port="/dev/ttyCH343USB0")`, `--receiver /dev/ttyCH343USB0`).
+- **Permission to open it.** The port belongs to the `dialout` group
+  (`uucp` on Arch). Add yourself once, then log out and in again:
+
+  ```bash
+  sudo usermod -aG dialout "$USER"
+  ```
+
+  Without it, opening the receiver raises `ConnectionFailed` with code
+  `no_access`.
+- **Flow control on a CH343 receiver** (USB id `1a86:55d3` or `1a86:55d4` in
+  `lsusb`). The link needs RTS/CTS flow control, which `cdc_acm` leaves off
+  on this chip. `open_link()` (and so `open_receiver()` and the `pandora`
+  commands) switches it on with a USB request of the chip's own, which
+  needs write access to the receiver's USB device. This udev rule gives it:
+
+  ```
+  # /etc/udev/rules.d/99-01glove.rules
+  SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", TAG+="uaccess", GROUP="dialout", MODE="0660"
+  SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", TAG+="uaccess", GROUP="dialout", MODE="0660"
+  ```
+
+  Then `sudo udevadm control --reload` and plug the receiver in again.
+  Without it, readings still arrive, but commands to the receiver (haptics,
+  Hall settings, firmware updates) can lose bytes; on opening, the
+  `pandora_sdk` logger says so at `INFO`, and the udev rule it mentions is
+  this one. WCH's `ch343` driver does flow control itself and needs no rule.
+- **Profiles** are in `~/.pandora/profiles` of the user running the
+  program. A program run as another user (`sudo`, a service) has another
+  home folder: name the folder.
 
 #### Raw only
 
@@ -515,6 +552,7 @@ except pandora_sdk.ConnectionFailed as failed:
 | `no_receiver` | No receiver is plugged in |
 | `several_receivers` | More than one is plugged in and no port was named |
 | `in_use` | Another program holds the receiver's port; the app, when it runs |
+| `no_access` | This user may not open the receiver's port: on Linux, not in its group (see [Linux](#linux)) |
 | `open_failed` | The port would not open for another reason |
 | `app_not_running` | Nothing answered at the app's address: it is not running, or Protocol is off |
 | `not_the_app` | Something answered there but sent no hello |

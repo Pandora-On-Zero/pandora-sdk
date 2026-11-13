@@ -22,10 +22,10 @@ from typing import Callable, Optional
 
 from pandora_core_rs.firmware_package import DONGLE, GLOVE, resolve_image
 from pandora_core_rs.firmware_update import DfuTarget, FirmwareUpdater, run_update, wait_version
-from pandora_core_rs.receiver import ReceiverLink, is_port_locked, streaming_gloves
+from pandora_core_rs.receiver import ReceiverLink, streaming_gloves
 
-from pandora_sdk.local import receiver_port
-from pandora_sdk.source import ConnectionFailed, PandoraError
+from pandora_sdk.local import open_refusal, receiver_port
+from pandora_sdk.source import PandoraError
 
 # The names the command takes for what is updated: (package kind, DFU target).
 # "dongle" is the app's and ota_flash's word for the receiver.
@@ -68,11 +68,7 @@ def update_firmware(target: str, image: str, *, port: Optional[str] = None,
     try:
         link = ReceiverLink.open(port, updater.on_line, say)
     except OSError as failed:  # serial.SerialException is an OSError
-        if is_port_locked(failed):
-            raise ConnectionFailed(
-                f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                "close it, then update the firmware.", "in_use") from failed
-        raise ConnectionFailed(f"could not open {port}: {failed}", "open_failed") from failed
+        raise open_refusal(port, failed, "close it, then update the firmware.") from failed
     updater.link = link
     try:
         if kind == GLOVE:

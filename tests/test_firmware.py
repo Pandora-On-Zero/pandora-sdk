@@ -209,6 +209,21 @@ def test_while_the_app_holds_the_receiver_it_refuses_and_says_to_close_it(
     assert "COM7 is in use" in err and "01 Glove app" in err
 
 
+def test_a_port_this_user_may_not_open_is_refused_naming_the_group(
+        monkeypatch, tmp_path, capsys):
+    def _forbidden(port, **_how):
+        raise OSError(13, f"could not open port {port}: [Errno 13] Permission denied: '{port}'")
+
+    monkeypatch.setattr(receiver, "open_port", _forbidden)
+
+    code = main(["update-firmware", "dongle", signed_image(tmp_path), "--receiver",
+                 "/dev/ttyACM0", "--yes"])
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "may not open /dev/ttyACM0" in err and "dialout" in err
+
+
 def test_a_file_that_is_no_firmware_image_is_refused_before_the_receiver_is_opened(
         tmp_path, capsys):
     """The guard in conftest fails the test if any port is opened."""
