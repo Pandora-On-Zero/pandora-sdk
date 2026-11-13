@@ -332,18 +332,40 @@ def test_two_receivers_have_their_code(monkeypatch):
     assert failed.value.code == "several_receivers"
 
 
-def test_a_receiver_in_use_has_its_code_and_the_os_error_as_its_cause(monkeypatch):
-    refusal = OSError("could not open port 'COM7': PermissionError(13, 'Access is denied.')")
-
+@pytest.mark.parametrize("port, refusal", [
+    ("COM7", OSError("could not open port 'COM7': PermissionError(13, 'Access is denied.')")),
+    ("/dev/ttyACM0", OSError(11, "Could not exclusively lock port /dev/ttyACM0: "
+                                 "[Errno 11] Resource temporarily unavailable")),
+], ids=["windows", "linux"])
+def test_a_receiver_in_use_has_its_code_and_the_os_error_as_its_cause(monkeypatch, port,
+                                                                       refusal):
     def _held(port, **_kwargs):
         raise refusal
 
     monkeypatch.setattr(receiver, "open_port", _held)
 
     with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
-        pandora_sdk.open_receiver(PROFILES, port="COM7", defaults={})
+        pandora_sdk.open_receiver(PROFILES, port=port, defaults={})
 
     assert failed.value.code == "in_use"
+    assert failed.value.__cause__ is refusal
+
+
+def test_a_port_this_user_may_not_open_has_its_code_and_names_the_group(monkeypatch):
+    """Linux: the receiver's port belongs to the dialout group."""
+    refusal = OSError(13, "could not open port /dev/ttyACM0: "
+                          "[Errno 13] Permission denied: '/dev/ttyACM0'")
+
+    def _forbidden(port, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(receiver, "open_port", _forbidden)
+
+    with pytest.raises(pandora_sdk.ConnectionFailed) as failed:
+        pandora_sdk.open_receiver(PROFILES, port="/dev/ttyACM0", defaults={})
+
+    assert failed.value.code == "no_access"
+    assert "dialout" in str(failed.value)
     assert failed.value.__cause__ is refusal
 
 
@@ -930,7 +952,7 @@ def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, g
 
 
 # A real glove with earth-field cancellation on: tests/data/right_earth.json,
-# recorded packets copied from pandora-core-rs's golden vectors.
+# packets recorded from it.
 EARTH = json.loads((Path(__file__).parent / "data" / "right_earth.json").read_text(
     encoding="utf-8"))
 EARTH_PAYLOADS = [base64.b64decode(packet) for packet in EARTH["packets"]]
@@ -984,7 +1006,7 @@ def test_hall_is_the_gloves_own_counts_whatever_else_is_asked_for(link, subscrip
 def test_with_earth_cancellation_on_the_cancelled_counts_are_the_apps(link):
     """What the app's server sends for the same packets: the glove's pipeline
     over every one of them, then the core's encode_raw on the packet after
-    it (SoftwareInterface/services/protocol_server.py)."""
+    it, in the app's protocol server."""
     raws, _, _ = earth_raw(link, [{"stream": "raw", "cancelled": True}])
     decoder = PacketDecoder()
     apps = []

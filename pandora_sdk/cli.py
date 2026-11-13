@@ -198,7 +198,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="update the receiver's or a glove's firmware over the air, with no app",
         description="Flash a signed firmware image onto the receiver or onto a glove "
                     "through it, with the app closed, and wait until the new image is "
-                    "confirmed. The same update as the app's tools/ota_flash.py flash. "
+                    "confirmed. The same update as the app's Firmware tab. "
                     "Asks before writing anything unless --yes is given.")
     flash.add_argument("target", choices=list(firmware.TARGETS),
                        help="what to update (dongle is the receiver)")

@@ -14,7 +14,7 @@ with pandora_sdk.connect() as gloves:
         print(hand.angles_deg[1])    # index: MCP, PIP, DIP flexion, MCP abduction
 ```
 
-**Status:** version 0.2, private. It reads hands, raw readings and the
+**Status:** version 0.4. It reads hands, raw readings and the
 pipeline's debug values, through a running app or straight from the receiver
 with no app. It sends haptics and Hall settings to a glove, gives each glove's
 calibration bounds, calibrates a glove with no app (`pandora calibrate`) and
@@ -29,28 +29,24 @@ see [Not here yet](#not-here-yet).
 Rust core, for the message format and the hand pipeline. It comes as a
 prebuilt wheel from a public release of `Pandora-On-Zero/Pandora-Release`
 (Windows x86_64, Linux x86_64 and aarch64 with glibc 2.28+, macOS); elsewhere
-there is no wheel and nothing is installed for it. `pandora-sdk` itself lives
-in a private repository, so installing needs git and a GitHub login that can
-read it.
+there is no wheel and nothing is installed for it. `pandora-sdk` itself is
+installed from this repository's release tag, which needs git:
 
 ```bash
-pip install git+https://github.com/Pandora-On-Zero/pandora-sdk.git
+pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk@v0.4.0"
 ```
 
-Python 3.11 or newer. It brings in `pandora-core-rs`, `websockets` and
-`pyserial` (for the receiver); no numpy.
+The same line goes into a `requirements.txt` or a project's dependencies.
+Python 3.10 or newer (3.10 is what ROS 2 Humble runs on). It brings in
+`pandora-core-rs`, `websockets` and `pyserial` (for the receiver); no numpy.
 
-To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
-
-```bash
-pip install --force-reinstall git+https://github.com/Pandora-On-Zero/pandora-sdk.git
-```
-
-Without it pip may keep the `pandora-sdk` it already has, even with
-`--upgrade`: pip judges an installed package by its version number, not by the
-commit it came from. That is why this library's version goes up with every
-change a program may depend on (see [Working on it](#working-on-it)).
-This version needs `pandora-core-rs` 0.2.0 (release `core-rs-v0.2.0`).
+To move to a newer `pandora-sdk`, install it again with the newer tag. A
+branch or a commit instead of a tag works too, but then add
+`--force-reinstall` when moving: pip judges an installed package by its
+version number, not by the commit it came from, so without it pip may keep
+the `pandora-sdk` it already has. That is why this library's version goes up
+with every change a program may depend on (see [Working on it](#working-on-it)).
+This version needs `pandora-core-rs` 0.2.1 (release `core-rs-v0.2.1`).
 
 ## Before you connect
 
@@ -125,7 +121,8 @@ pinky:
 | `wall_time_us` | The same instant on the wall clock, microseconds since 1970 (UTC), for lining frames up with another recording; `None` from an app older than this field. Measure intervals with `time_us`: the wall clock can be set back |
 
 The exact meaning of every field is the protocol's specification,
-`pandora-core-rs/PROTOCOL.md` in the Pandora repository.
+`PROTOCOL.md`, attached to each [release of this
+repository](https://github.com/Pandora-On-Zero/pandora-sdk/releases).
 
 ### Raw readings
 
@@ -450,7 +447,7 @@ gloves = pandora_sdk.Local(link=port)             # closing gloves closes the po
 | Call | Gives |
 | --- | --- |
 | `list_receivers()` | The receivers plugged in, as `ReceiverPort` (`device`, the port to open; `serial_number`, the receiver's stable identity, `""` when it reports none; `product`), sorted by port name in number order |
-| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use` or `open_failed` when the port will not open |
+| `open_link(port=None, *, timeout=0.2, write_timeout=2.0)` | The receiver's port, a pyserial `Serial`, opened as the link needs: 4 Mbaud, RTS/CTS flow control, held by this program alone (and on Linux the CH343's flow control switched on). With no port, the one receiver plugged in (`ConnectionFailed` with code `no_receiver` or `several_receivers` otherwise). `timeout` is how long a read waits for its first byte, `write_timeout` how long a write may wait on the receiver before it raises; both in seconds. `ConnectionFailed` with code `in_use`, `no_access` or `open_failed` when the port will not open |
 
 `Local(link=...)` reads any object with the port's `read`, `in_waiting`,
 `write` and `close`, which is also how to feed it a recording or a simulator.
@@ -458,6 +455,43 @@ gloves = pandora_sdk.Local(link=port)             # closing gloves closes the po
 One thread runs every glove's pipeline. On the PC this was written on, a
 packet takes about a millisecond with both streams and the skeleton on, and a
 glove sends 200 a second.
+
+#### Linux
+
+- **Which port.** The receiver is found by its USB ids among the serial
+  ports pyserial lists, which under the kernel's own `cdc_acm` driver is a
+  `/dev/ttyACM*`. With WCH's `ch343` kernel driver installed instead, the
+  port is a `/dev/ttyCH343USB*`, which pyserial does not list: name it
+  (`open_receiver(port="/dev/ttyCH343USB0")`, `--receiver /dev/ttyCH343USB0`).
+- **Permission to open it.** The port belongs to the `dialout` group
+  (`uucp` on Arch). Add yourself once, then log out and in again:
+
+  ```bash
+  sudo usermod -aG dialout "$USER"
+  ```
+
+  Without it, opening the receiver raises `ConnectionFailed` with code
+  `no_access`.
+- **Flow control on a CH343 receiver** (USB id `1a86:55d3` or `1a86:55d4` in
+  `lsusb`). The link needs RTS/CTS flow control, which `cdc_acm` leaves off
+  on this chip. `open_link()` (and so `open_receiver()` and the `pandora`
+  commands) switches it on with a USB request of the chip's own, which
+  needs write access to the receiver's USB device. This udev rule gives it:
+
+  ```
+  # /etc/udev/rules.d/99-01glove.rules
+  SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", TAG+="uaccess", GROUP="dialout", MODE="0660"
+  SUBSYSTEM=="usb", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", TAG+="uaccess", GROUP="dialout", MODE="0660"
+  ```
+
+  Then `sudo udevadm control --reload` and plug the receiver in again.
+  Without it, readings still arrive, but commands to the receiver (haptics,
+  Hall settings, firmware updates) can lose bytes; on opening, the
+  `pandora_sdk` logger says so at `INFO`, and the udev rule it mentions is
+  this one. WCH's `ch343` driver does flow control itself and needs no rule.
+- **Profiles** are in `~/.pandora/profiles` of the user running the
+  program. A program run as another user (`sudo`, a service) has another
+  home folder: name the folder.
 
 #### Raw only
 
@@ -515,6 +549,7 @@ except pandora_sdk.ConnectionFailed as failed:
 | `no_receiver` | No receiver is plugged in |
 | `several_receivers` | More than one is plugged in and no port was named |
 | `in_use` | Another program holds the receiver's port; the app, when it runs |
+| `no_access` | This user may not open the receiver's port: on Linux, not in its group (see [Linux](#linux)) |
 | `open_failed` | The port would not open for another reason |
 | `app_not_running` | Nothing answered at the app's address: it is not running, or Protocol is off |
 | `not_the_app` | Something answered there but sent no hello |
@@ -658,8 +693,7 @@ nothing was flashed, and 130 after Ctrl+C. While the app holds the receiver it
 refuses to start, and says to close the app.
 
 The update itself is `pandora-core-rs`'s (`firmware_update`), the one the
-app's Firmware tab and its `tools/ota_flash.py flash` run, and this takes
-the same arguments as that tool, with the port as `--receiver`.
+app's Firmware tab runs.
 
 ## Working on it
 
@@ -680,23 +714,21 @@ tested against a made-up serial port, `tests/fakelink.py`, fed packets built
 from the tracking packet's layout; the firmware update against a made-up
 receiver that answers the DFU protocol (`tests/test_firmware.py`). The counts
 after earth-field cancellation are also tested on 40 packets recorded from a
-glove with cancellation on, copied from the Pandora repository's golden
-vectors (`tests/data/right_earth.json`). No test
+glove with cancellation on (`tests/data/right_earth.json`). No test
 can open a real port (`tests/conftest.py` refuses it), and every test gets a
 temporary home folder, so none reads or writes your `.pandora/profiles`.
 
 `pyproject.toml` pins `pandora-core-rs` to one release of
 `Pandora-On-Zero/Pandora-Release`: one direct reference per platform, each
-with its marker and its wheel's `#sha256=`, copied from that release's notes
-(`pandora-core-rs/README.md` in the Pandora repository, "Installing the Python
-binding"). Move the pin when the core gains something this library should use;
+with its marker and its wheel's `#sha256=`, copied from that release's notes.
+Move the pin when the core gains something this library should use;
 every release has a new version, so all four lines change. Then install again
 with `pip install --force-reinstall -e ".[dev]"`.
 
 **This library's own `version`** (`pyproject.toml`) follows the same rule as
 the core's: it goes up in the same change as anything a program may depend on
 (a new call, option or field, a changed behaviour, a moved core pin). Programs
-pin `pandora-sdk` to a commit too, and pip keeps an installed `pandora-sdk`
+may pin `pandora-sdk` to a commit, and pip keeps an installed `pandora-sdk`
 whose version matches, so without the raise a program whose pin moved keeps
 running the old library without saying so. A change that only touches the
 tests or this README needs none.
@@ -736,8 +768,17 @@ with a second pull request (`git cherry-pick`).
   `set_hall_range` does it when asked.
 - Reading which hand a glove is from the glove itself. `pandora calibrate`
   is told, with `--hand`.
-- Reading the firmware version without flashing. The app's
-  `tools/ota_flash.py version` does it.
+- Reading the firmware version without flashing.
 - An `asyncio` client. This one is blocking, with one background thread.
-- A licence, and a release on PyPI. Both wait for the repository going public,
-  `pandora-core-rs`'s wheels are public already.
+- A release on PyPI.
+
+## Licence
+
+`pandora-sdk` is licensed under the [PolyForm Noncommercial License
+1.0.0](LICENSE.md): free to use, change and share for any noncommercial
+purpose, as that licence defines it: personal study, research, hobby projects,
+and use by charities, educational institutions, public research organizations
+and government institutions, among others.
+
+Commercial use needs a separate licence from the maintainers: contact
+Pandora-On-Zero.

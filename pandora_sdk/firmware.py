@@ -4,8 +4,8 @@ the air, with no app.
     pandora update-firmware receiver dfu_application.zip
     pandora update-firmware glove build/ --device NRF_GLOVE_E5D1
 
-What `tools/ota_flash.py flash` in the app does, over the same pandora-core-rs
-code: the image is found and checked by firmware_package.resolve_image, the
+What the app's Firmware tab does, over the same pandora-core-rs code: the
+image is found and checked by firmware_package.resolve_image, the
 port is opened and read by receiver.ReceiverLink, and the update is
 firmware_update's FirmwareUpdater driven by wait_version and run_update. This
 file adds what a person at a terminal needs around it: which port and which
@@ -22,17 +22,17 @@ from typing import Callable, Optional
 
 from pandora_core_rs.firmware_package import DONGLE, GLOVE, resolve_image
 from pandora_core_rs.firmware_update import DfuTarget, FirmwareUpdater, run_update, wait_version
-from pandora_core_rs.receiver import ReceiverLink, is_port_locked, streaming_gloves
+from pandora_core_rs.receiver import ReceiverLink, streaming_gloves
 
-from pandora_sdk.local import receiver_port
-from pandora_sdk.source import ConnectionFailed, PandoraError
+from pandora_sdk.local import open_refusal, receiver_port
+from pandora_sdk.source import PandoraError
 
 # The names the command takes for what is updated: (package kind, DFU target).
-# "dongle" is the app's and ota_flash's word for the receiver.
+# "dongle" is the app's word for the receiver.
 TARGETS = {"receiver": (DONGLE, DfuTarget.DONGLE), "dongle": (DONGLE, DfuTarget.DONGLE),
            "glove": (GLOVE, DfuTarget.LEFT_CONTROLLER)}
 # Seconds of listening for which glove is sending when none is named, and of
-# waiting for a version reply: ota_flash's.
+# waiting for a version reply: the app's.
 GLOVE_LISTEN_S = 3.0
 VERSION_WAIT_S = 5.0
 
@@ -68,11 +68,7 @@ def update_firmware(target: str, image: str, *, port: Optional[str] = None,
     try:
         link = ReceiverLink.open(port, updater.on_line, say)
     except OSError as failed:  # serial.SerialException is an OSError
-        if is_port_locked(failed):
-            raise ConnectionFailed(
-                f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                "close it, then update the firmware.", "in_use") from failed
-        raise ConnectionFailed(f"could not open {port}: {failed}", "open_failed") from failed
+        raise open_refusal(port, failed, "close it, then update the firmware.") from failed
     updater.link = link
     try:
         if kind == GLOVE:

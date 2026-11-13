@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from typing import (Any, Callable, Deque, Dict, Iterator, List, Optional, Self, Sequence, Union,
-                    overload)
+from typing import (Any, Callable, Deque, Dict, Iterator, List, Optional, Sequence, TypeVar,
+                    Union, overload)
 
 from pandora_core_rs import protocol
 from pandora_core_rs.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR, HALL_DEFAULT_OSR,
@@ -26,6 +26,8 @@ from pandora_core_rs.packet_layout import (HALL_DEFAULT_FILTER, HALL_DEFAULT_ODR
 from pandora_core_rs.protocol import Calibration, Debug, Device, Frame, Raw, Subscription
 
 Message = Union[Frame, Raw, Debug]
+
+_SourceT = TypeVar("_SourceT", bound="Source")
 
 _log = logging.getLogger("pandora_sdk")
 
@@ -62,6 +64,8 @@ CONNECTION_FAILED_CODES = {
     "no_receiver": "no receiver is plugged into this computer",
     "several_receivers": "more than one receiver is plugged in, and no port was named",
     "in_use": "another program holds the receiver's port (the app, when it runs)",
+    "no_access": "this user may not open the receiver's port (on Linux: not in its group, "
+                 "such as dialout)",
     "open_failed": "the receiver's port would not open for another reason",
     "app_not_running": "nothing answered at the app's address: it is not running, or its "
                        "Protocol adapter is off",
@@ -351,7 +355,7 @@ class Source:
     def close(self) -> None:
         raise NotImplementedError
 
-    def __enter__(self) -> Self:
+    def __enter__(self: _SourceT) -> _SourceT:
         return self
 
     def __exit__(self, *_exc: object) -> None:

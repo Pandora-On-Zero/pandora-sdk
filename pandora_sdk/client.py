@@ -1,4 +1,4 @@
-"""A client for the 01 Glove app's wire protocol (PROTOCOL.md in the Pandora repository).
+"""A client for the 01 Glove app's wire protocol (PROTOCOL.md, attached to each release).
 
     import pandora_sdk
 

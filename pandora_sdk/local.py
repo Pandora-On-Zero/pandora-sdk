@@ -143,13 +143,28 @@ def open_link(port: Optional[str] = None, *, timeout: float = 0.2,
     try:
         link = receiver.open_port(port, timeout=timeout, write_timeout=write_timeout)
     except OSError as failed:
-        if receiver.is_port_locked(failed):
-            raise ConnectionFailed(
-                f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
-                "read through it with pandora_sdk.connect(), or close it.", "in_use") from failed
-        raise ConnectionFailed(f"could not open {port}: {failed}", "open_failed") from failed
+        raise open_refusal(port, failed, "read through it with pandora_sdk.connect(), "
+                                         "or close it.") from failed
     receiver.prepare_link(port, link, _log.info)
     return link
+
+
+def open_refusal(port: str, failed: OSError, while_the_app_runs: str) -> ConnectionFailed:
+    """ConnectionFailed for *port* refusing to open with *failed*: in_use,
+    no_access or open_failed. *while_the_app_runs* ends the in_use message.
+    Windows says "Access is denied" for a port another program holds; POSIX
+    says "Permission denied" only for a port this user may not open, and
+    "could not exclusively lock" for a held one."""
+    words = str(failed).lower()
+    if "permission denied" in words and "exclusively lock" not in words:
+        return ConnectionFailed(
+            f"this user may not open {port}. On Linux, add yourself to the group that owns "
+            "it (dialout on Debian and Ubuntu, uucp on Arch) and log in again.", "no_access")
+    if receiver.is_port_locked(failed):
+        return ConnectionFailed(
+            f"{port} is in use. If the 01 Glove app is running it holds the receiver: "
+            f"{while_the_app_runs}", "in_use")
+    return ConnectionFailed(f"could not open {port}: {failed}", "open_failed")
 
 
 def send_command(link: Any, payload: bytes) -> None:
