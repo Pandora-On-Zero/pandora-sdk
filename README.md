@@ -39,7 +39,7 @@ Python 3.10 or newer (3.10 is what ROS 2 Humble runs on). It brings in
 `pandora-core-rs`, `websockets` and `pyserial` (for the receiver); no numpy.
 
 A branch or a commit of this repository installs too
-(`pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk@main"`),
+(`pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk-python@main"`),
 but add `--force-reinstall` when moving: pip judges an installed package by its
 version number, not by the commit it came from, so without it pip may keep
 the `pandora-sdk` it already has. That is why this library's version goes up
@@ -120,7 +120,7 @@ pinky:
 
 The exact meaning of every field is the protocol's specification,
 `PROTOCOL.md`, attached to each [release of this
-repository](https://github.com/Pandora-On-Zero/pandora-sdk/releases).
+repository](https://github.com/Pandora-On-Zero/pandora-sdk-python/releases).
 
 ### Raw readings
 
