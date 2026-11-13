@@ -20,8 +20,8 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/Pandora-On-Zero/pandora-sdk"
-Changelog = "https://github.com/Pandora-On-Zero/pandora-sdk/blob/main/CHANGELOG.md"
+Source = "https://github.com/Pandora-On-Zero/pandora-sdk-python"
+Changelog = "https://github.com/Pandora-On-Zero/pandora-sdk-python/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # msgpack: tests/standin.py decodes the binary messages on its own.
