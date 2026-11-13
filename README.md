@@ -777,5 +777,15 @@ with a second pull request (`git cherry-pick`).
 - Reading the firmware version without flashing. The app's
   `tools/ota_flash.py version` does it.
 - An `asyncio` client. This one is blocking, with one background thread.
-- A licence, and a release on PyPI. Both wait for the repository going public,
-  `pandora-core-rs`'s wheels are public already.
+- A release on PyPI.
+
+## Licence
+
+`pandora-sdk` is licensed under the [PolyForm Noncommercial License
+1.0.0](LICENSE.md): free to use, change and share for any noncommercial
+purpose, as that licence defines it: personal study, research, hobby projects,
+and use by charities, educational institutions, public research organizations
+and government institutions, among others.
+
+Commercial use needs a separate licence from the maintainers: contact
+Pandora-On-Zero.

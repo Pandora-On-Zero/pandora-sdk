@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "pandora-sdk"
 version = "0.3.1"
 description = "Hands from the 01 Glove app in a few lines of Python"
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE.md"]
 requires-python = ">=3.10"
 dependencies = [
     # The message format and the pipeline are pandora-core-rs's (the Rust core's
