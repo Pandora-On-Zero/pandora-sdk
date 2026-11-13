@@ -27,26 +27,24 @@ see [Not here yet](#not-here-yet).
 
 `pandora-sdk` uses `pandora-core-rs`, the Python binding of the 01 Glove's
 Rust core, for the message format and the hand pipeline. It comes as a
-prebuilt wheel from a public release of `Pandora-On-Zero/Pandora-Release`
-(Windows x86_64, Linux x86_64 and aarch64 with glibc 2.28+, macOS); elsewhere
-there is no wheel and nothing is installed for it. `pandora-sdk` itself is
-installed from this repository's release tag, which needs git:
+prebuilt wheel (Windows x86_64, Linux x86_64 and aarch64 with glibc 2.28+,
+macOS); elsewhere there is no wheel. Both are on PyPI:
 
 ```bash
-pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk@v0.4.0"
+pip install pandora-sdk
 ```
 
-The same line goes into a `requirements.txt` or a project's dependencies.
+In a project's dependencies, pin a range, such as `pandora-sdk>=0.4.1,<0.5`.
 Python 3.10 or newer (3.10 is what ROS 2 Humble runs on). It brings in
 `pandora-core-rs`, `websockets` and `pyserial` (for the receiver); no numpy.
 
-To move to a newer `pandora-sdk`, install it again with the newer tag. A
-branch or a commit instead of a tag works too, but then add
-`--force-reinstall` when moving: pip judges an installed package by its
+A branch or a commit of this repository installs too
+(`pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk@main"`),
+but add `--force-reinstall` when moving: pip judges an installed package by its
 version number, not by the commit it came from, so without it pip may keep
 the `pandora-sdk` it already has. That is why this library's version goes up
 with every change a program may depend on (see [Working on it](#working-on-it)).
-This version needs `pandora-core-rs` 0.2.1 (release `core-rs-v0.2.1`).
+This version needs `pandora-core-rs` 0.2.3 or a later 0.2.
 
 ## Before you connect
 
@@ -718,12 +716,17 @@ glove with cancellation on (`tests/data/right_earth.json`). No test
 can open a real port (`tests/conftest.py` refuses it), and every test gets a
 temporary home folder, so none reads or writes your `.pandora/profiles`.
 
-`pyproject.toml` pins `pandora-core-rs` to one release of
-`Pandora-On-Zero/Pandora-Release`: one direct reference per platform, each
-with its marker and its wheel's `#sha256=`, copied from that release's notes.
-Move the pin when the core gains something this library should use;
-every release has a new version, so all four lines change. Then install again
-with `pip install --force-reinstall -e ".[dev]"`.
+`pyproject.toml` takes `pandora-core-rs` from PyPI within one minor version
+(`>=0.2.3,<0.3`). Raise the lower bound when the core gains something this
+library uses, and the range when the core's minor version changes. Then install
+again with `pip install -e ".[dev]"`.
+
+**Releasing:** raise `version` in `pyproject.toml`, add the version's entry to
+`CHANGELOG.md`, merge, then push a tag `v<version>` on `main`.
+`.github/workflows/release.yml` builds the package and publishes it to PyPI
+(Trusted Publishing, in the GitHub environment `pypi`, which only `v*` tags may
+deploy to). Then create the GitHub release from the tag with the changelog
+entry as its notes and `PROTOCOL.md` attached.
 
 **This library's own `version`** (`pyproject.toml`) follows the same rule as
 the core's: it goes up in the same change as anything a program may depend on
@@ -770,7 +773,6 @@ with a second pull request (`git cherry-pick`).
   is told, with `--hand`.
 - Reading the firmware version without flashing.
 - An `asyncio` client. This one is blocking, with one background thread.
-- A release on PyPI.
 
 ## Licence
 
