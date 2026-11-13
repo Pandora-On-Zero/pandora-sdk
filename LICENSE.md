@@ -1,5 +1,7 @@
 # PolyForm Noncommercial License 1.0.0
 
+Required Notice: Copyright 2026 Pandora-On-Zero
+
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
 
 ## Acceptance
