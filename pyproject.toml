@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandora-sdk"
-version = "0.3.1"
+version = "0.4.0"
 description = "Hands from the 01 Glove app in a few lines of Python"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"

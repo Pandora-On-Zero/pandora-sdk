@@ -14,7 +14,7 @@ with pandora_sdk.connect() as gloves:
         print(hand.angles_deg[1])    # index: MCP, PIP, DIP flexion, MCP abduction
 ```
 
-**Status:** version 0.2, private. It reads hands, raw readings and the
+**Status:** version 0.4. It reads hands, raw readings and the
 pipeline's debug values, through a running app or straight from the receiver
 with no app. It sends haptics and Hall settings to a glove, gives each glove's
 calibration bounds, calibrates a glove with no app (`pandora calibrate`) and
@@ -29,27 +29,23 @@ see [Not here yet](#not-here-yet).
 Rust core, for the message format and the hand pipeline. It comes as a
 prebuilt wheel from a public release of `Pandora-On-Zero/Pandora-Release`
 (Windows x86_64, Linux x86_64 and aarch64 with glibc 2.28+, macOS); elsewhere
-there is no wheel and nothing is installed for it. `pandora-sdk` itself lives
-in a private repository, so installing needs git and a GitHub login that can
-read it.
+there is no wheel and nothing is installed for it. `pandora-sdk` itself is
+installed from this repository's release tag, which needs git:
 
 ```bash
-pip install git+https://github.com/Pandora-On-Zero/pandora-sdk.git
+pip install "pandora-sdk @ git+https://github.com/Pandora-On-Zero/pandora-sdk@v0.4.0"
 ```
 
-Python 3.10 or newer. It brings in `pandora-core-rs`, `websockets` and
-`pyserial` (for the receiver); no numpy.
+The same line goes into a `requirements.txt` or a project's dependencies.
+Python 3.10 or newer (3.10 is what ROS 2 Humble runs on). It brings in
+`pandora-core-rs`, `websockets` and `pyserial` (for the receiver); no numpy.
 
-To move an existing install to a newer `pandora-sdk`, add `--force-reinstall`:
-
-```bash
-pip install --force-reinstall git+https://github.com/Pandora-On-Zero/pandora-sdk.git
-```
-
-Without it pip may keep the `pandora-sdk` it already has, even with
-`--upgrade`: pip judges an installed package by its version number, not by the
-commit it came from. That is why this library's version goes up with every
-change a program may depend on (see [Working on it](#working-on-it)).
+To move to a newer `pandora-sdk`, install it again with the newer tag. A
+branch or a commit instead of a tag works too, but then add
+`--force-reinstall` when moving: pip judges an installed package by its
+version number, not by the commit it came from, so without it pip may keep
+the `pandora-sdk` it already has. That is why this library's version goes up
+with every change a program may depend on (see [Working on it](#working-on-it)).
 This version needs `pandora-core-rs` 0.2.0 (release `core-rs-v0.2.0`).
 
 ## Before you connect
@@ -125,7 +121,8 @@ pinky:
 | `wall_time_us` | The same instant on the wall clock, microseconds since 1970 (UTC), for lining frames up with another recording; `None` from an app older than this field. Measure intervals with `time_us`: the wall clock can be set back |
 
 The exact meaning of every field is the protocol's specification,
-`pandora-core-rs/PROTOCOL.md` in the Pandora repository.
+`PROTOCOL.md`, attached to each [release of this
+repository](https://github.com/Pandora-On-Zero/pandora-sdk/releases).
 
 ### Raw readings
 
@@ -696,8 +693,7 @@ nothing was flashed, and 130 after Ctrl+C. While the app holds the receiver it
 refuses to start, and says to close the app.
 
 The update itself is `pandora-core-rs`'s (`firmware_update`), the one the
-app's Firmware tab and its `tools/ota_flash.py flash` run, and this takes
-the same arguments as that tool, with the port as `--receiver`.
+app's Firmware tab runs.
 
 ## Working on it
 
@@ -718,23 +714,21 @@ tested against a made-up serial port, `tests/fakelink.py`, fed packets built
 from the tracking packet's layout; the firmware update against a made-up
 receiver that answers the DFU protocol (`tests/test_firmware.py`). The counts
 after earth-field cancellation are also tested on 40 packets recorded from a
-glove with cancellation on, copied from the Pandora repository's golden
-vectors (`tests/data/right_earth.json`). No test
+glove with cancellation on (`tests/data/right_earth.json`). No test
 can open a real port (`tests/conftest.py` refuses it), and every test gets a
 temporary home folder, so none reads or writes your `.pandora/profiles`.
 
 `pyproject.toml` pins `pandora-core-rs` to one release of
 `Pandora-On-Zero/Pandora-Release`: one direct reference per platform, each
-with its marker and its wheel's `#sha256=`, copied from that release's notes
-(`pandora-core-rs/README.md` in the Pandora repository, "Installing the Python
-binding"). Move the pin when the core gains something this library should use;
+with its marker and its wheel's `#sha256=`, copied from that release's notes.
+Move the pin when the core gains something this library should use;
 every release has a new version, so all four lines change. Then install again
 with `pip install --force-reinstall -e ".[dev]"`.
 
 **This library's own `version`** (`pyproject.toml`) follows the same rule as
 the core's: it goes up in the same change as anything a program may depend on
 (a new call, option or field, a changed behaviour, a moved core pin). Programs
-pin `pandora-sdk` to a commit too, and pip keeps an installed `pandora-sdk`
+may pin `pandora-sdk` to a commit, and pip keeps an installed `pandora-sdk`
 whose version matches, so without the raise a program whose pin moved keeps
 running the old library without saying so. A change that only touches the
 tests or this README needs none.
@@ -774,8 +768,7 @@ with a second pull request (`git cherry-pick`).
   `set_hall_range` does it when asked.
 - Reading which hand a glove is from the glove itself. `pandora calibrate`
   is told, with `--hand`.
-- Reading the firmware version without flashing. The app's
-  `tools/ota_flash.py version` does it.
+- Reading the firmware version without flashing.
 - An `asyncio` client. This one is blocking, with one background thread.
 - A release on PyPI.
 

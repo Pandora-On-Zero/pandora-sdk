@@ -952,7 +952,7 @@ def test_raw_with_the_cancelled_counts_keeps_the_gloves_pipeline_running(link, g
 
 
 # A real glove with earth-field cancellation on: tests/data/right_earth.json,
-# recorded packets copied from pandora-core-rs's golden vectors.
+# packets recorded from it.
 EARTH = json.loads((Path(__file__).parent / "data" / "right_earth.json").read_text(
     encoding="utf-8"))
 EARTH_PAYLOADS = [base64.b64decode(packet) for packet in EARTH["packets"]]
@@ -1006,7 +1006,7 @@ def test_hall_is_the_gloves_own_counts_whatever_else_is_asked_for(link, subscrip
 def test_with_earth_cancellation_on_the_cancelled_counts_are_the_apps(link):
     """What the app's server sends for the same packets: the glove's pipeline
     over every one of them, then the core's encode_raw on the packet after
-    it (SoftwareInterface/services/protocol_server.py)."""
+    it, in the app's protocol server."""
     raws, _, _ = earth_raw(link, [{"stream": "raw", "cancelled": True}])
     decoder = PacketDecoder()
     apps = []
