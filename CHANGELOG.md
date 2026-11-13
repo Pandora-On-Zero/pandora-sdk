@@ -3,6 +3,11 @@
 What changed in each release of pandora-sdk, newest first. Every change a program may
 notice raises the version.
 
+## 0.4.1 (2026-11-13)
+
+- **On PyPI:** `pip install pandora-sdk`.
+- Depends on `pandora-core-rs>=0.2.3,<0.3` from PyPI instead of four pinned wheel links.
+
 ## 0.4.0 (2026-11-13)
 
 First public release.

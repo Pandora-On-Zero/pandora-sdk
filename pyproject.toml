@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandora-sdk"
-version = "0.4.0"
+version = "0.4.1"
 description = "Hands from the 01 Glove app in a few lines of Python"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -12,16 +12,16 @@ license-files = ["LICENSE.md"]
 requires-python = ">=3.10"
 dependencies = [
     # The message format and the pipeline are pandora-core-rs's (the Rust core's
-    # Python binding), not a copy of them: one prebuilt wheel per platform from a
-    # Pandora-Release release; see README, "Installing".
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-win_amd64.whl#sha256=89960215e0e0ff4640ea9143e59b941cfb940db382f6a102bb0c17deffe9c417 ; sys_platform == 'win32' and platform_machine == 'AMD64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-manylinux_2_28_x86_64.whl#sha256=b74978c783fedec3505720b3930e50c383b2a8cd94cb8c078055e208b863d4d9 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-manylinux_2_28_aarch64.whl#sha256=2df9b3747eaa6624bf754bca7f5222e564f37055eaf7c7610b3aafb15f259b10 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
-    "pandora-core-rs @ https://github.com/Pandora-On-Zero/Pandora-Release/releases/download/core-rs-v0.2.1/pandora_core_rs-0.2.1-cp310-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl#sha256=7a0e9db584b4d760e6887ed32cacadacf9d2dcf6cef581f2beb7e05555f96a9e ; sys_platform == 'darwin'",
+    # Python binding, prebuilt wheels on PyPI), not a copy of them.
+    "pandora-core-rs>=0.2.3,<0.3",
     # The receiver's port (pandora_core_rs.receiver).
     "pyserial>=3.5",
     "websockets>=13",
 ]
+
+[project.urls]
+Source = "https://github.com/Pandora-On-Zero/pandora-sdk"
+Changelog = "https://github.com/Pandora-On-Zero/pandora-sdk/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # msgpack: tests/standin.py decodes the binary messages on its own.
